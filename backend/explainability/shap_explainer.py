@@ -1,14 +1,6 @@
 """
 shap_explainer.py — SHAP TreeExplainer wrapper for XGBoost forecasts.
-
-Output example
-──────────────
-{
-  "feature_contributions": {"bilan_net": 52, "pressure": 18, "steam_hp": 14},
-  "base_value": 120000.0,
-  "predicted_value": 145320.0,
-  "narrative": "Net balance is below threshold.  Pressure remains stable. ..."
-}
+Returns data formatted specifically for the Dash frontend charts.
 """
 
 from __future__ import annotations
@@ -66,72 +58,84 @@ class SHAPExplainer:
         self._explainers[key] = ex
         return ex
 
-    # ── Explain one prediction ────────────────────────────────────────────────
+    # ── Explain predictions (returns data formatted for Dash frontend) ────────
 
     def explain(self, df: pd.DataFrame, target: str = "bilan_net",
                 horizon: str = "24h") -> dict:
-        """Compute SHAP values for the most recent data point."""
+        """Compute SHAP values for a sample of data to support frontend charts."""
         key     = f"{target}_{horizon}"
         feats   = self.predictor.feature_names.get(key)
         if feats is None:
             self.predictor._load(key)
             feats = self.predictor.feature_names.get(key, [])
+            
+        if not feats:
+            raise ValueError(f"No features found for model {key}")
 
-        # Prepare input row
-        avail = [f for f in feats if f in df.columns]
-        row   = df.iloc[-1:].copy()
-        for f in feats:
-            if f not in row.columns:
-                row[f] = 0.0
-        X = row[feats].fillna(0).values
+        # Prepare input data: take the last 100 rows for charts, or all if less
+        n_samples = min(100, len(df))
+        X_sample = df.tail(n_samples)[feats].fillna(0).values
 
         explainer   = self._get_explainer(target, horizon)
-        shap_values = explainer.shap_values(X)
-
-        if isinstance(shap_values, list):
-            sv = shap_values[0][0]
-        else:
-            sv = shap_values[0]
-
+        
+        # Compute SHAP values for the sample (returns a 2D matrix)
+        shap_values_matrix = explainer.shap_values(X_sample)
+        if isinstance(shap_values_matrix, list):
+            shap_values_matrix = shap_values_matrix[0]
+            
+        # Base value
         base_val   = float(explainer.expected_value
                            if not hasattr(explainer.expected_value, "__len__")
                            else explainer.expected_value[0])
-        pred_val   = float(base_val + sv.sum())
+                           
+        # Last row prediction
+        sv_last = shap_values_matrix[-1]
+        pred_val = float(base_val + sv_last.sum())
+        
+        # Compute mean absolute SHAP for the bar chart
+        mean_abs_shap = np.abs(shap_values_matrix).mean(axis=0).tolist()
+        
+        # Top features for narrative
+        contributions = {f: round(float(v), 4) for f, v in zip(feats, sv_last)}
+        top = dict(sorted(contributions.items(), key=lambda x: abs(x[1]), reverse=True)[:10])
 
-        contributions = {f: round(float(v), 4) for f, v in zip(feats, sv)}
-        top           = dict(sorted(contributions.items(),
-                                    key=lambda x: abs(x[1]), reverse=True)[:10])
-
-        # Convert to percentage importance
-        total_abs = sum(abs(v) for v in top.values()) or 1
-        pct       = {f: round(abs(v) / total_abs * 100, 1) for f, v in top.items()}
-
+        # Return EXACTLY the keys the Dash frontend expects
         return {
-            "feature_contributions": contributions,
-            "top_features":          top,
-            "importance_pct":        pct,
-            "base_value":            round(base_val, 2),
-            "predicted_value":       round(pred_val, 2),
-            "narrative":             self._narrative(top, contributions),
-            "target":                target,
-            "horizon":               horizon,
+            "feature_names": feats,
+            "mean_abs_shap": mean_abs_shap,
+            "shap_values": shap_values_matrix.tolist(), # 2D list for heatmap
+            "base_value": round(base_val, 2),
+            "predicted_value": round(pred_val, 2),
+            "explanation": self._narrative(top, contributions),
+            "target": target,
+            "horizon": horizon,
         }
 
     # ── Explain an RL recommendation ─────────────────────────────────────────
 
     def explain_recommendation(self, action_label: str,
                                 shap_result: dict) -> str:
-        """
-        Convert a SHAP result dict into a human-readable recommendation text.
-        """
+        """Convert a SHAP result dict into a human-readable recommendation text."""
         top = list(shap_result.get("top_features", {}).keys())[:3]
-        pct = shap_result.get("importance_pct", {})
+        if not top and "feature_names" in shap_result:
+            mean_abs = shap_result.get("mean_abs_shap", [])
+            if mean_abs:
+                top_idx = sorted(range(len(mean_abs)), key=lambda i: abs(mean_abs[i]), reverse=True)[:3]
+                top = [shap_result["feature_names"][i] for i in top_idx]
+                
         parts = [f"Recommendation: {action_label}", "", "Reason:"]
+        
+        contributions = shap_result.get("feature_contributions", {})
+        if not contributions and "feature_names" in shap_result and "shap_values" in shap_result:
+            feats = shap_result["feature_names"]
+            sv_last = shap_result["shap_values"][-1]
+            contributions = {f: v for f, v in zip(feats, sv_last)}
+            
         for feat in top:
-            val = shap_result["feature_contributions"].get(feat, 0)
+            val = contributions.get(feat, 0)
             direction = "high" if val > 0 else "low"
             tmpl = _NARRATIVES.get(feat, {}).get(direction, f"{feat} is a key driver.")
-            parts.append(f"  • {tmpl}  (contribution {pct.get(feat, 0):.0f}%)")
+            parts.append(f"  • {tmpl}")
         return "\n".join(parts)
 
     # ── Narrative builder ─────────────────────────────────────────────────────
@@ -143,20 +147,3 @@ class SHAPExplainer:
             tmpl = _NARRATIVES.get(feat, {}).get(direction, f"{feat} is a key driver.")
             lines.append(tmpl)
         return "  ".join(lines)
-
-    # ── Waterfall data for Dash ───────────────────────────────────────────────
-
-    def waterfall_data(self, shap_result: dict) -> dict:
-        """Return data structure ready for Plotly waterfall chart."""
-        contrib = shap_result.get("top_features", {})
-        feats   = list(contrib.keys())
-        vals    = list(contrib.values())
-        base    = shap_result.get("base_value", 0)
-        return {
-            "features":   feats,
-            "values":     vals,
-            "base_value": base,
-            "measure":    ["relative"] * len(feats) + ["total"],
-            "x":          feats + ["Final"],
-            "y":          vals  + [shap_result.get("predicted_value", base + sum(vals))],
-        }

@@ -10,7 +10,7 @@ from datetime import datetime
 
 # ── Historical ────────────────────────────────────────────────────────────────
 class HistoricalRecord(BaseModel):
-    timestamp:  str
+    timestamp:   str
     gta1:        Optional[float] = None
     gta2:        Optional[float] = None
     gta3:        Optional[float] = None
@@ -26,6 +26,36 @@ class HistoricalRecord(BaseModel):
     pressure:    Optional[float] = None
     vibration:   Optional[float] = None
     temperature: Optional[float] = None
+    
+    # Ajustement : Intégration complète des variables physiques des turbines (GTA 1, 2, 3)
+    debit_adm_gta1:    Optional[float] = None
+    debit_adm_gta2:    Optional[float] = None
+    debit_adm_gta3:    Optional[float] = None
+    debit_sout_gta1:   Optional[float] = None
+    debit_sout_gta2:   Optional[float] = None
+    debit_sout_gta3:   Optional[float] = None
+    debit_ext_gta1:    Optional[float] = None
+    debit_ext_gta2:    Optional[float] = None
+    debit_ext_gta3:    Optional[float] = None
+    rendement_gta1:    Optional[float] = None
+    rendement_gta2:    Optional[float] = None
+    rendement_gta3:    Optional[float] = None
+    pression_adm_gta1: Optional[float] = None
+    pression_adm_gta2: Optional[float] = None
+    pression_adm_gta3: Optional[float] = None
+    temp_adm_gta1:     Optional[float] = None
+    temp_adm_gta2:     Optional[float] = None
+    temp_adm_gta3:     Optional[float] = None
+    h_adm_gta1:        Optional[float] = None
+    h_adm_gta2:        Optional[float] = None
+    h_adm_gta3:        Optional[float] = None
+    h_sout_gta1:       Optional[float] = None
+    h_sout_gta2:       Optional[float] = None
+    h_sout_gta3:       Optional[float] = None
+    h_ext_gta1:        Optional[float] = None
+    h_ext_gta2:        Optional[float] = None
+    h_ext_gta3:        Optional[float] = None
+    year:              Optional[int]   = None
 
 
 # ── Realtime ──────────────────────────────────────────────────────────────────
@@ -125,7 +155,8 @@ class SimulationResponse(BaseModel):
 # ── Chat / RAG ────────────────────────────────────────────────────────────────
 class ChatRequest(BaseModel):
     question:       str
-    context_window: int = 24
+    history: List[dict] = []
+    context_hours: int = 24
 
 
 class ChatResponse(BaseModel):

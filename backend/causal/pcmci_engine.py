@@ -6,7 +6,7 @@ Falls back to Granger causality if tigramite is not installed.
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-
+from .granger_validator import GrangerValidator
 try:
     import tigramite
     from tigramite import data_processing as pp

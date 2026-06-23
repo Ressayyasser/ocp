@@ -36,43 +36,85 @@ import pandas as pd
 
 def _parse_journalier(path: str, sheet: str, prefix: str) -> pd.DataFrame:
     """
-    Parse one 'Journalier GTAx' sheet.
-    Returns a DataFrame indexed by Date with prefixed columns.
-    Rows with Énergie == 0 are kept but flagged (GTA2 was offline in 2025).
+    Parse one 'Journalier GTAx' sheet with robust dynamic header detection
+    and flexible column name matching.
     """
-    df = pd.read_excel(path, sheet_name=sheet, engine="openpyxl")
+    # 1. Dynamically locate the header row (handles top title rows or blank rows)
+    # Read the first 10 rows without headers to inspect where the table actually begins
+    df_preview = pd.read_excel(path, sheet_name=sheet, header=None, nrows=10, engine="openpyxl")
+    
+    header_idx = 0
+    for i, row in df_preview.iterrows():
+        row_values = [str(val).lower().strip() for val in row.dropna()]
+        # Identify the header row by looking for key structural anchors
+        if any("date" in v for v in row_values) and any("adm" in v or "débit" in v or "énergie" in v for v in row_values):
+            header_idx = i
+            break
 
-    # Rename to canonical internal names
-    rename = {
-        "Date":             "timestamp",
-        "Débit adm (t/h)":  f"debit_adm_{prefix}",
-        "T° adm (°C)":      f"temp_adm_{prefix}",
-        "P adm (bar)":      f"pression_adm_{prefix}",
-        "H adm (kJ/kg)":    f"h_adm_{prefix}",
-        "Débit sout. (t/h)":f"debit_sout_{prefix}",
-        "T° sout. (°C)":    f"temp_sout_{prefix}",
-        "P sout. (bar)":    f"p_sout_{prefix}",
-        "H sout. (kJ/kg)":  f"h_sout_{prefix}",
-        "Débit ext. (t/h)": f"debit_ext_{prefix}",
-        "T° ext. (°C)":     f"temp_ext_{prefix}",
-        "P ext. (mbar)":    f"p_ext_{prefix}",
-        "H ext. (kJ/kg)":   f"h_ext_{prefix}",
-        "Énergie (MWh)":    f"energie_{prefix}",
-        "Rendement (%)":    f"rendement_{prefix}",
+    # 2. Re-read the full dataframe using the dynamically discovered header index
+    df = pd.read_excel(path, sheet_name=sheet, header=header_idx, engine="openpyxl")
+
+    # Clean up column names (ensure they are strings and stripped of whitespace)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # 3. Flexible case/accent-insensitive substring mapping rules
+    mapping_rules = {
+        "date":             "timestamp",
+        "débit adm":        f"debit_adm_{prefix}",
+        "t° adm":           f"temp_adm_{prefix}",
+        "p adm":            f"pression_adm_{prefix}",
+        "h adm":            f"h_adm_{prefix}",
+        "débit sout":       f"debit_sout_{prefix}",
+        "t° sout":          f"temp_sout_{prefix}",
+        "p sout":           f"p_sout_{prefix}",
+        "h sout":           f"h_sout_{prefix}",
+        "débit ext":        f"debit_ext_{prefix}",
+        "t° ext":           f"temp_ext_{prefix}",
+        "p ext":            f"p_ext_{prefix}",
+        "h ext":            f"h_ext_{prefix}",
+        "énergie":          f"energie_{prefix}",
+        "rendement":        f"rendement_{prefix}",
     }
+
+    rename = {}
+    for col in df.columns:
+        col_normalized = col.lower().replace("é", "e").replace("è", "e").replace("à", "a")
+        for key, target in mapping_rules.items():
+            key_normalized = key.replace("é", "e").replace("è", "e").replace("à", "a")
+            if key_normalized in col_normalized:
+                rename[col] = target
+                break
+
     df = df.rename(columns=rename)
+
+    # 4. Emergency Fallback for the Date column if not explicitly matched
+    if "timestamp" not in df.columns:
+        for col in df.columns:
+            if "date" in col.lower() or "time" in col.lower() or "jour" in col.lower():
+                df = df.rename(columns={col: "timestamp"})
+                break
+        else:
+            # If no date keywords match, assume the very first column is the date column
+            if len(df.columns) > 0:
+                df = df.rename(columns={df.columns[0]: "timestamp"})
+
+    # 5. Safe Datetime Parsing & Row Cleaning
     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce", dayfirst=True)
+    
+    # Drops empty rows or trailer calculation rows (e.g., 'Moyenne', 'Total') automatically
     df = df.dropna(subset=["timestamp"]).reset_index(drop=True)
+    
     return df
 
-
 # ── Workbook loader ───────────────────────────────────────────────────────────
+
+# Replace the _load_workbook and load_all_gta_data functions with this implementation:
 
 def _load_workbook(path: str, year: int) -> pd.DataFrame:
     """
     Merge the three Journalier sheets from one workbook into a daily DataFrame.
     """
-    xl   = pd.ExcelFile(path, engine="openpyxl")
+    xl = pd.ExcelFile(path, engine="openpyxl")
     sheets = {s.lower(): s for s in xl.sheet_names}
 
     # Try to find each GTA sheet (case-insensitive, partial match)
@@ -89,8 +131,8 @@ def _load_workbook(path: str, year: int) -> pd.DataFrame:
     if not s1:
         raise ValueError(f"No GTA1 sheet found in {path}")
 
-    df1 = _parse_journalier(path, s1, "gta1")
-    base = df1[["timestamp"]].copy()
+    # Build base directly from parsed df1 to preserve columns and index safety
+    base = _parse_journalier(path, s1, "gta1")
 
     if s2:
         df2 = _parse_journalier(path, s2, "gta2")
@@ -98,9 +140,6 @@ def _load_workbook(path: str, year: int) -> pd.DataFrame:
     if s3:
         df3 = _parse_journalier(path, s3, "gta3")
         base = base.merge(df3, on="timestamp", how="left")
-
-    # Re-attach GTA1 columns
-    base = base.merge(df1.drop(columns=["timestamp"]), left_index=True, right_index=True, how="left")
 
     # ── Derived canonical columns ────────────────────────────────────────────
     e1 = base.get("energie_gta1", pd.Series(0.0, index=base.index)).fillna(0)
@@ -113,8 +152,7 @@ def _load_workbook(path: str, year: int) -> pd.DataFrame:
     base["production"] = e1 + e2 + e3
 
     # Efficiency: average of operating GTAs (non-zero)
-    rend_cols = [c for c in ["rendement_gta1", "rendement_gta2", "rendement_gta3"]
-                 if c in base.columns]
+    rend_cols = [c for c in ["rendement_gta1", "rendement_gta2", "rendement_gta3"] if c in base.columns]
     if rend_cols:
         rend_df = base[rend_cols].replace(0, np.nan)
         base["efficiency"] = rend_df.mean(axis=1) / 100.0   # convert % → fraction
@@ -122,8 +160,7 @@ def _load_workbook(path: str, year: int) -> pd.DataFrame:
         base["efficiency"] = np.nan
 
     # Pressure: average HP admission pressure across operating GTAs
-    p_cols = [c for c in ["pression_adm_gta1", "pression_adm_gta2", "pression_adm_gta3"]
-              if c in base.columns]
+    p_cols = [c for c in ["pression_adm_gta1", "pression_adm_gta2", "pression_adm_gta3"] if c in base.columns]
     if p_cols:
         p_df = base[p_cols].replace(0, np.nan)
         base["pressure"] = p_df.mean(axis=1)
@@ -131,15 +168,14 @@ def _load_workbook(path: str, year: int) -> pd.DataFrame:
         base["pressure"] = np.nan
 
     # Temperature: average admission temperature
-    t_cols = [c for c in ["temp_adm_gta1", "temp_adm_gta2", "temp_adm_gta3"]
-              if c in base.columns]
+    t_cols = [c for c in ["temp_adm_gta1", "temp_adm_gta2", "temp_adm_gta3"] if c in base.columns]
     if t_cols:
         t_df = base[t_cols].replace(0, np.nan)
         base["temperature"] = t_df.mean(axis=1)
     else:
         base["temperature"] = np.nan
 
-    # Steam proxies: HP = total admission flow (t/h), MP = soutirage flow, BP = extraction flow
+    # Steam proxies
     d_adm_cols  = [c for c in ["debit_adm_gta1",  "debit_adm_gta2",  "debit_adm_gta3"]  if c in base.columns]
     d_sout_cols = [c for c in ["debit_sout_gta1", "debit_sout_gta2", "debit_sout_gta3"] if c in base.columns]
     d_ext_cols  = [c for c in ["debit_ext_gta1",  "debit_ext_gta2",  "debit_ext_gta3"]  if c in base.columns]
@@ -148,41 +184,39 @@ def _load_workbook(path: str, year: int) -> pd.DataFrame:
     base["steam_mp"] = base[d_sout_cols].fillna(0).sum(axis=1) if d_sout_cols else np.nan
     base["steam_bp"] = base[d_ext_cols].fillna(0).sum(axis=1)  if d_ext_cols  else np.nan
 
-    # Steam ratio
-    base["steam_ratio"] = np.where(
-        base["steam_hp"] > 0, base["steam_mp"] / base["steam_hp"], np.nan
-    )
+    base["steam_ratio"] = np.where(base["steam_hp"] > 0, base["steam_mp"] / base["steam_hp"], np.nan)
 
-    # Bilan net: production - ~14% auto-consumption estimate (no separate conso column in data)
+    # Bilan net: production - ~14% auto-consumption estimate
     base["consumption"] = base["production"] * 0.14
     base["bilan_net"]   = base["production"] - base["consumption"]
-
-    # Vibration: not in original data → simulate placeholder (will be replaced by SCADA)
-    base["vibration"] = np.nan
+    base["vibration"]   = np.nan
 
     base["year"] = year
     base = base.sort_values("timestamp").reset_index(drop=True)
     return base
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 def load_all_gta_data(data_dir: str = "data") -> pd.DataFrame:
     """
     Load all GTA Excel workbooks from *data_dir*.
-    Accepts filenames like GTA_Donnees_Completes_2022_GENERATED.xlsx
-    Returns a single sorted canonical DataFrame.
     """
-    pattern = os.path.join(data_dir, "*.xlsx")
-    files   = sorted(glob.glob(pattern))
+    # Defensive absolute path check to see where it's looking
+    abs_data_path = os.path.abspath(data_dir)
+    print(f"Searching for Excel workbooks in: {abs_data_path}")
+
+    # Catches both .xlsx and .xls extensions
+    files = sorted(glob.glob(os.path.join(data_dir, "*.xl*")))
+    
     if not files:
-        raise FileNotFoundError(f"No Excel files found in {data_dir!r}")
+        raise FileNotFoundError(
+            f"No Excel files found in '{data_dir}' (Absolute Path: {abs_data_path}).\n"
+            f"Please verify the directory exists and contains valid .xlsx workbooks."
+        )
 
     frames: list[pd.DataFrame] = []
     for f in files:
         stem = Path(f).stem
-        # Extract 4-digit year from filename
-        year = next((int(t) for t in stem.split("_") if t.isdigit() and len(t) == 4), 2023)
+        year = next((int(t) for t in stem.split("_") if t.isdigit() and len(t) == 4), 2025)
         print(f"  Loading {Path(f).name}  (year={year})")
         try:
             df = _load_workbook(f, year)
@@ -196,10 +230,45 @@ def load_all_gta_data(data_dir: str = "data") -> pd.DataFrame:
         raise ValueError("No data could be loaded from Excel files")
 
     merged = pd.concat(frames, ignore_index=True).sort_values("timestamp").reset_index(drop=True)
-    # Remove exact duplicate dates (keep first)
     merged = merged.drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
     print(f"  → Total: {len(merged):,} rows, {len(merged.columns)} columns")
     return merged
+
+# ── Public API ────────────────────────────────────────────────────────────────
+
+# def load_all_gta_data(data_dir: str = "data") -> pd.DataFrame:
+#     """
+#     Load all GTA Excel workbooks from *data_dir*.
+#     Accepts filenames like GTA_Donnees_Completes_2022_GENERATED.xlsx
+#     Returns a single sorted canonical DataFrame.
+#     """
+#     pattern = os.path.join(data_dir, "*.xlsx")
+#     files   = sorted(glob.glob(pattern))
+#     if not files:
+#         raise FileNotFoundError(f"No Excel files found in {data_dir!r}")
+
+#     frames: list[pd.DataFrame] = []
+#     for f in files:
+#         stem = Path(f).stem
+#         # Extract 4-digit year from filename
+#         year = next((int(t) for t in stem.split("_") if t.isdigit() and len(t) == 4), 2023)
+#         print(f"  Loading {Path(f).name}  (year={year})")
+#         try:
+#             df = _load_workbook(f, year)
+#             frames.append(df)
+#             print(f"    → {len(df)} days, production range "
+#                   f"[{df['production'].min():.0f}–{df['production'].max():.0f}] MWh")
+#         except Exception as exc:
+#             print(f"    ⚠  Skipped: {exc}")
+
+#     if not frames:
+#         raise ValueError("No data could be loaded from Excel files")
+
+#     merged = pd.concat(frames, ignore_index=True).sort_values("timestamp").reset_index(drop=True)
+#     # Remove exact duplicate dates (keep first)
+#     merged = merged.drop_duplicates(subset=["timestamp"]).reset_index(drop=True)
+#     print(f"  → Total: {len(merged):,} rows, {len(merged.columns)} columns")
+#     return merged
 
 
 # ── DB persistence ────────────────────────────────────────────────────────────

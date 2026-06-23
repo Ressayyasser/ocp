@@ -101,8 +101,6 @@ class SCADASimulator:
             "gta1":        prod_data["gta1"],
             "gta2":        prod_data["gta2"],
             "gta3":        prod_data["gta3"],
-            "gtaa":        prod_data["gtaa"],
-            "gtab":        prod_data["gtab"],
             "production":  round(production,  2),
             "consumption": round(consumption, 2),
             "bilan_net":   round(bilan_net,   2),

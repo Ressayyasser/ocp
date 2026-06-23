@@ -6,6 +6,35 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+def clean_historical_data(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Nettoyage des données historiques après chargement et validation.
+    """
+    df_clean = df.copy()
+    
+    # 1. Tri et gestion de l'index temporel
+    df_clean["timestamp"] = pd.to_datetime(df_clean["timestamp"])
+    df_clean = df_clean.sort_values("timestamp").reset_index(drop=True)
+    
+    # 2. Traitement des valeurs aberrantes / Physiquement impossibles
+    # Si le rendement ou les débits sont négatifs à cause d'un bruit de capteur
+    numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        if "debit" in col or "rendement" in col or "energie" in col:
+            df_clean[col] = df_clean[col].clip(lower=0)
+
+    # 3. Imputation des valeurs manquantes (Ex: Vibration manquante dans l'Excel)
+    # Pour la vibration, on peut définir une valeur de référence stable (ex: 15 mm/s)
+    if "vibration" in df_clean.columns:
+        df_clean["vibration"] = df_clean["vibration"].fillna(15.0)
+        
+    # Pour les variables thermodynamiques, interpolation linéaire si trous mineurs
+    cols_to_interpolate = ["pressure", "temperature", "efficiency", "steam_ratio"]
+    for col in cols_to_interpolate:
+        if col in df_clean.columns:
+            df_clean[col] = df_clean[col].interpolate(method="linear").bfill()
+
+    return df_clean
 
 def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """

@@ -1,0 +1,60 @@
+/* OCP Cogeneration AI Platform — custom Dash theme */
+
+body {
+    background-color: #1a1a2e;
+    color: #e0e0e0;
+    font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+/* Sidebar nav pills */
+.nav-pills .nav-link {
+    color: #aaa;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    padding: 8px 14px;
+    transition: background 0.2s, color 0.2s;
+}
+.nav-pills .nav-link:hover {
+    background-color: #2a2a4e;
+    color: #fff;
+}
+.nav-pills .nav-link.active {
+    background-color: #f0c040 !important;
+    color: #1a1a2e !important;
+    font-weight: 600;
+}
+
+/* Cards */
+.card {
+    border-radius: 10px;
+}
+.card-header {
+    background-color: transparent;
+    border-bottom: 1px solid #333;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+/* Dropdown dark style */
+.Select-control {
+    background-color: #2a2a3e !important;
+    border-color: #444 !important;
+    color: #fff !important;
+}
+.Select-menu-outer {
+    background-color: #2a2a3e !important;
+    color: #fff !important;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #1a1a2e; }
+::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #666; }
+
+/* Table */
+.table-dark th { background-color: #2a2a3e !important; font-size: 0.8rem; }
+.table-dark td { font-size: 0.8rem; }
+
+/* Badge */
+.badge { font-size: 0.75rem; }

@@ -38,10 +38,62 @@ def init_db():
             rendement_gta1  REAL, rendement_gta2  REAL, rendement_gta3  REAL,
             pression_adm_gta1 REAL, pression_adm_gta2 REAL, pression_adm_gta3 REAL,
             temp_adm_gta1   REAL, temp_adm_gta2   REAL, temp_adm_gta3   REAL,
+            -- Ajustement : Ajout des colonnes d'Enthalpie manquantes
+            h_adm_gta1 REAL, h_adm_gta2 REAL, h_adm_gta3 REAL,
+            h_sout_gta1 REAL, h_sout_gta2 REAL, h_sout_gta3 REAL,
+            h_ext_gta1 REAL, h_ext_gta2 REAL, h_ext_gta3 REAL,
             year            INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_hist_ts ON historical_data(timestamp);
 
+        CREATE TABLE IF NOT EXISTS simulations (
+            simulation_id TEXT PRIMARY KEY,
+            scenario_type TEXT,
+            base_params TEXT,
+            start_time TEXT,
+            status TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS simulation_data (
+            id INTEGER PRIMARY KEY,
+            simulation_id TEXT,
+            timestamp TEXT,
+            gta_type TEXT,
+
+            -- High Pressure (Admission)
+            adm_debit REAL, adm_temp REAL, adm_pression REAL,
+
+            -- Medium Pressure (Soutirage)
+            sout_debit REAL, sout_pression REAL,
+
+            -- External / Extraction
+            ext_debit REAL, ext_pression REAL,
+
+            -- Low Pressure (Basse Pression)
+            bp_pression REAL, bp_debit REAL,
+
+            -- Performance & Energy
+            puissance_mw REAL, rendement REAL,
+
+            -- Mechanical & Vibrations
+            vitesse REAL, vib1 REAL, vib2 REAL, dd3 REAL,
+
+            -- Lubrication Oil System
+            oil_pression REAL, oil_temp REAL,
+
+            -- Electrical Parameters
+            cos_phi REAL, p_active REAL, p_reactive REAL, tension REAL,
+
+            -- Actuators & Targets
+            posit_hp REAL, posit_bp REAL, vap_inlet REAL,
+
+            -- Condenser Loop
+            cond_temp REAL, cond_eau REAL, level_pct REAL,
+
+            anomaly_flag INTEGER,
+            FOREIGN KEY(simulation_id) REFERENCES simulations(simulation_id)
+        );
+                      
         CREATE TABLE IF NOT EXISTS predictions (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp       TEXT NOT NULL DEFAULT (datetime('now')),
@@ -67,15 +119,15 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_anom_ts ON anomalies(timestamp);
 
         CREATE TABLE IF NOT EXISTS recommendations (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp        TEXT NOT NULL DEFAULT (datetime('now')),
-            action           TEXT NOT NULL,
-            action_index     INTEGER,
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp         TEXT NOT NULL DEFAULT (datetime('now')),
+            action            TEXT NOT NULL,
+            action_index      INTEGER,
             expected_gain_mwh REAL,
             economic_gain_dh  REAL,
-            confidence       REAL,
-            shap_explanation TEXT,
-            applied          INTEGER DEFAULT 0
+            confidence        REAL,
+            shap_explanation  TEXT,
+            applied           INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS alerts (

@@ -9,7 +9,7 @@ import numpy as np
 class SteamGenerator:
     # Real nominal: sum of Débit adm across 3 GTAs ~530 t/h HP,
     # Débit sout ~420 t/h MP, Débit ext ~145 t/h BP (from 2022–2025 data)
-    _NOMINAL = {"steam_hp": 530.0, "steam_mp": 420.0, "steam_bp": 145.0}
+    _NOMINAL = {"steam_hp": 197.0, "steam_mp": 145.0, "steam_bp": 20.0}
 
     def __init__(self, noise_std: float = 2.0, rng_seed: int | None = None):
         self.rng        = np.random.default_rng(rng_seed)

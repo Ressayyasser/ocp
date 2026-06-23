@@ -42,6 +42,7 @@ class PredictorService:
             "horizon":         result["horizon"],
             "predicted_value": result["predicted_value"],
             "confidence":      result["confidence"],
+            "model_version":   "xgboost_v1",  # Ajustement : Renseigne la colonne model_version
         }])
         return result
 
@@ -50,9 +51,12 @@ class PredictorService:
         results = self.predictor.predict_all(df)
         if results:
             insert_many("predictions", [{
-                "timestamp": r["timestamp"], "variable": r["variable"],
-                "horizon": r["horizon"], "predicted_value": r["predicted_value"],
-                "confidence": r["confidence"],
+                "timestamp":       r["timestamp"], 
+                "variable":        r["variable"],
+                "horizon":         r["horizon"], 
+                "predicted_value": r["predicted_value"],
+                "confidence":      r["confidence"],
+                "model_version":   "xgboost_v1",  # Ajustement : Renseigne la colonne model_version
             } for r in results])
         return results
 

@@ -1,12 +1,5 @@
 """
 xgboost_predictor.py — Multi-target, multi-horizon XGBoost forecaster.
-
-Targets  : bilan_net | production | efficiency
-Horizons : 1h | 24h | 7d | 30d
-
-Output example
-──────────────
-{"variable":"bilan_net","horizon":"24h","predicted_value":145320.0,"confidence":0.92}
 """
 
 from __future__ import annotations
@@ -32,9 +25,10 @@ except ImportError:
 
 MODEL_DIR = os.environ.get("MODEL_DIR", "models/forecasting")
 
-TARGETS: list[str] = ["bilan_net", "production", "efficiency"]
+# FIXED: Added "steam_hp" to allowed targets to support the incoming API requests
+TARGETS: list[str] = ["bilan_net", "production", "efficiency", "steam_hp"]
 
-HORIZONS: dict[str, int] = {"1h": 1, "24h": 24, "7d": 168, "30d": 720}
+HORIZONS: dict[str, int] = {"1d": 1, "24h": 1, "7d": 7, "30d": 30}
 
 _BASE_FEATS: dict[str, list[str]] = {
     "bilan_net": [
@@ -69,6 +63,16 @@ _BASE_FEATS: dict[str, list[str]] = {
         "temp_adm_gta1", "temp_adm_gta2", "temp_adm_gta3",
         "gta_balance", "efficiency_roll_7d",
         "month_sin", "month_cos", "day_of_week",
+    ],
+    # FIXED: Defined relevant feature matrix for steam high-pressure forecasting
+    "steam_hp": [
+        "production", "consumption", "steam_mp", "steam_bp",
+        "steam_ratio", "efficiency", "gta_balance",
+        "gta1", "gta2", "gta3",
+        "debit_adm_gta1", "debit_adm_gta2", "debit_adm_gta3",
+        "rendement_gta1", "rendement_gta2", "rendement_gta3",
+        "pressure", "temperature",
+        "month_sin", "month_cos", "is_weekend", "day_of_week",
     ],
 }
 
@@ -114,7 +118,7 @@ class XGBoostPredictor:
     # ── Train ─────────────────────────────────────────────────────────────────
 
     def train(self, df: pd.DataFrame, target: str = "bilan_net",
-              horizon_key: str = "24h") -> dict:
+              horizon_key: str = "1d") -> dict:
         if not _HAS_XGB:
             raise ImportError("pip install xgboost")
         horizon = HORIZONS[horizon_key]
@@ -126,7 +130,7 @@ class XGBoostPredictor:
         Xtr, Xte = X[:split], X[split:]
         ytr, yte = y[:split], y[split:]
 
-        model = xgb.XGBRegressor(**_XGB_PARAMS)
+        model = xgb.XGBRegressor(**_XGB_PARAMS, early_stopping_rounds=50)
         model.fit(Xtr, ytr, eval_set=[(Xte, yte)], verbose=False)
 
         ypred = model.predict(Xte)
@@ -164,7 +168,7 @@ class XGBoostPredictor:
     # ── Predict ───────────────────────────────────────────────────────────────
 
     def predict(self, df: pd.DataFrame, target: str = "bilan_net",
-                horizon_key: str = "24h") -> dict:
+                horizon_key: str = "1d") -> dict:
         key = f"{target}_{horizon_key}"
         if key not in self.models:
             self._load(key)
@@ -178,7 +182,9 @@ class XGBoostPredictor:
                 row[f] = 0.0
         X       = row[feats].fillna(0).values
         value   = float(self.models[key].predict(X)[0])
-        r2      = self.metrics.get(key, {}).get("r2") or 0.5
+        
+        metrics_r2 = self.metrics.get(key, {}).get("r2")
+        r2      = metrics_r2 if metrics_r2 is not None else 0.5
         conf    = max(0.0, min(1.0, r2))
 
         return {
@@ -205,6 +211,9 @@ class XGBoostPredictor:
         key = f"{target}_{horizon_key}"
         if key not in self.models:
             self._load(key)
+        if key not in self.models:
+            raise ValueError(f"No trained model found for {key}")
+            
         imp = self.models[key].feature_importances_
         return dict(sorted(
             zip(self.feature_names[key], map(float, imp)),

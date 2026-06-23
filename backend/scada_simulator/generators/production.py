@@ -15,8 +15,7 @@ class ProductionGenerator:
     # Nominal daily energy (MWh/day) — derived from 2022–2025 dataset means
     # GTA1: ~17000 MWh/month → ~565/day; GTA2 ~15000→500; GTA3 ~16000→533
     # Using monthly means from Excel; gtaa/gtab not present in this dataset
-    _SETPOINTS = {"gta1": 565, "gta2": 480, "gta3": 540,
-                  "gtaa": 0,   "gtab": 0}
+    _SETPOINTS = {"gta1": 25, "gta2": 23, "gta3": 24}
 
     def __init__(self, noise_std: float = 15.0, rng_seed: int | None = None):
         self.rng       = np.random.default_rng(rng_seed)

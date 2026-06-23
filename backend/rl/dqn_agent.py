@@ -25,6 +25,20 @@ try:
 except ImportError:
     _HAS_TORCH = False
 
+
+def _get_device():
+    if not _HAS_TORCH:
+        return None
+    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+# Cleaned up global level device logging
+_device = _get_device()
+print("Using device:", _device)
+if _HAS_TORCH and torch.cuda.is_available():
+    print("GPU:", torch.cuda.get_device_name(0))
+
+
 from rl.replay_buffer import PrioritizedReplayBuffer
 from rl.environment   import ACTIONS, N_ACTIONS, STATE_DIM
 
