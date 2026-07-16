@@ -70,6 +70,65 @@ _THRESHOLDS: list[dict] = [
      "msg": "Anomaly detected — review sensor readings"},
 ]
 
+# Thresholds for the *live SCADA* reading schema emitted by the simulator
+# (pressure_hp ~54.5 bar, steam_hp ~197 t/h, vibration ~0.x–x mm/s per GTA,
+#  per-GTA adm_pression / rendement). These mirror the injection scenarios
+# (pressure_drop, steam_loss, gta2_vibration, production_drop, overtemperature)
+# so a parameter falling below/above its nominal band raises an alert in real time.
+_SCADA_THRESHOLDS: list[dict] = [
+    # High-pressure steam flow (sum of 3 GTA admission flows), nominal ~197 t/h
+    {"var": "steam_hp",      "op": "<", "thr": 150.0, "level": "CRITICAL",
+     "msg": "Débit vapeur HP critique (<150 t/h) — fuite ou perte vapeur détectée"},
+    {"var": "steam_hp",      "op": "<", "thr": 170.0, "level": "WARNING",
+     "msg": "Débit vapeur HP anormalement bas (<170 t/h)"},
+
+    # HP steam pressure (bar), nominal ~54.5 — drops during pressure_drop scenario
+    {"var": "pressure_hp",   "op": "<", "thr": 40.0,  "level": "CRITICAL",
+     "msg": "Pression vapeur HP critique (<40 bar) — chute de pression détectée"},
+    {"var": "pressure_hp",   "op": "<", "thr": 48.0,  "level": "WARNING",
+     "msg": "Pression vapeur HP sous le seuil normal (<48 bar)"},
+
+    # Medium-pressure steam pressure (bar), nominal ~8.0
+    {"var": "pressure_mp",   "op": "<", "thr": 6.0,   "level": "WARNING",
+     "msg": "Pression vapeur MP basse (<6 bar)"},
+    {"var": "pressure_mp",   "op": ">", "thr": 11.0,  "level": "WARNING",
+     "msg": "Pression vapeur MP élevée (>11 bar)"},
+
+    # Vibration per GTA (mm/s), nominal <0.6 — spikes during gta2_vibration scenario
+    {"var": "vibration_gta1","op": ">", "thr": 4.5,   "level": "CRITICAL",
+     "msg": "Vibration GTA1 critique (>4.5 mm/s) — défaut roulement probable"},
+    {"var": "vibration_gta2","op": ">", "thr": 4.5,   "level": "CRITICAL",
+     "msg": "Vibration GTA2 critique (>4.5 mm/s) — défaut roulement probable"},
+    {"var": "vibration_gta3","op": ">", "thr": 4.5,   "level": "CRITICAL",
+     "msg": "Vibration GTA3 critique (>4.5 mm/s) — défaut roulement probable"},
+    {"var": "vibration_gta1","op": ">", "thr": 3.0,   "level": "WARNING",
+     "msg": "Vibration GTA1 élevée (>3.0 mm/s)"},
+    {"var": "vibration_gta2","op": ">", "thr": 3.0,   "level": "WARNING",
+     "msg": "Vibration GTA2 élevée (>3.0 mm/s)"},
+    {"var": "vibration_gta3","op": ">", "thr": 3.0,   "level": "WARNING",
+     "msg": "Vibration GTA3 élevée (>3.0 mm/s)"},
+
+    # Admission pressure per GTA (bar), nominal ~54.5
+    {"var": "adm_pression_gta1", "op": "<", "thr": 48.0, "level": "CRITICAL",
+     "msg": "Pression admission GTA1 critique (<48 bar)"},
+    {"var": "adm_pression_gta1", "op": "<", "thr": 51.0, "level": "WARNING",
+     "msg": "Pression admission GTA1 sous le seuil normal (<51 bar)"},
+
+    # Admission temperature per GTA (°C), nominal ~455 — rises during overtemperature
+    {"var": "adm_temp_gta1", "op": ">", "thr": 490.0, "level": "CRITICAL",
+     "msg": "Température admission GTA1 critique (>490°C) — surchaufe turbine"},
+    {"var": "adm_temp_gta1", "op": ">", "thr": 475.0, "level": "WARNING",
+     "msg": "Température admission GTA1 élevée (>475°C)"},
+
+    # Per-GTA efficiency (rendement, %), nominal 35–42
+    {"var": "rendement_gta1", "op": "<", "thr": 36.0, "level": "WARNING",
+     "msg": "Rendement GTA1 sous 36% — vérifier paramètres d'admission"},
+    {"var": "rendement_gta2", "op": "<", "thr": 30.0, "level": "WARNING",
+     "msg": "Rendement GTA2 sous 30% — vérifier paramètres d'admission"},
+    {"var": "rendement_gta3", "op": "<", "thr": 37.0, "level": "WARNING",
+     "msg": "Rendement GTA3 sous 37% — vérifier paramètres d'admission"},
+]
+
 _SUGGESTED_ACTIONS: dict[str, str] = {
     "production":        "Check GTA availability and steam supply",
     "rendement_gta1":    "Inspect GTA1 admission nozzles and blade fouling",
@@ -78,6 +137,13 @@ _SUGGESTED_ACTIONS: dict[str, str] = {
     "pression_adm_gta1": "Check HP steam supply valves for GTA1",
     "temp_adm_gta1":     "Monitor GTA1 turbine thermal stress — adjust load",
     "steam_hp":          "Check HP steam network — valve positions and leaks",
+    "pressure_hp":       "Check HP steam network — possible leak or trip",
+    "pressure_mp":       "Check MP steam extraction valves",
+    "vibration_gta1":    "Inspect GTA1 bearings and balance",
+    "vibration_gta2":    "Inspect GTA2 bearings and balance",
+    "vibration_gta3":    "Inspect GTA3 bearings and balance",
+    "adm_pression_gta1": "Check HP steam supply valves for GTA1",
+    "adm_temp_gta1":     "Reduce GTA1 load and monitor turbine thermal stress",
     "bilan_net":         "Increase GTA production or reduce plant consumption",
     "efficiency":        "Run efficiency diagnostic on all active GTAs",
     "anomaly_score":     "Review anomaly dashboard and run PCMCI causal analysis",
@@ -89,33 +155,69 @@ class AlertService:
     def __init__(self):
         self._subscribers: list = []   # callbacks for WebSocket broadcast
 
-    # ── Auto-check ────────────────────────────────────────────────────────────
+    # ── Threshold evaluation helper ─────────────────────────────────────────────
 
-    def check_reading(self, reading: dict) -> list[dict]:
-        """Evaluate a sensor reading against all thresholds. Returns new alerts."""
+    def _check_thresholds(self, reading: dict, thresholds: list[dict]) -> list[dict]:
+        """Evaluate a reading against a threshold list. Returns new alerts."""
         new_alerts: list[dict] = []
-        for rule in _THRESHOLDS:
+        for rule in thresholds:
             val = reading.get(rule["var"])
             if val is None:
                 continue
-            triggered = (rule["op"] == ">" and val > rule["thr"]) or \
-                        (rule["op"] == "<" and val < rule["thr"])
+            triggered = (rule["op"] == ">" and float(val) > float(rule["thr"])) or \
+                        (rule["op"] == "<" and float(val) < float(rule["thr"]))
             if triggered:
                 action = _SUGGESTED_ACTIONS.get(rule["var"], "Inspect system")
                 alert  = self._create_alert(
                     level=rule["level"],
                     message=rule["msg"],
                     source=rule["var"],
-                    reading_value=val,
+                    reading_value=float(val),
                     suggested_action=action,
                 )
                 new_alerts.append(alert)
+        return new_alerts
 
+    # ── Auto-check (historical / canonical schema) ──────────────────────────────
+
+    def check_reading(self, reading: dict) -> list[dict]:
+        """Evaluate a sensor reading (canonical/historical schema) against all thresholds."""
+        new_alerts = self._check_thresholds(reading, _THRESHOLDS)
         if new_alerts:
             insert_many("alerts", [_to_db(a) for a in new_alerts])
             for a in new_alerts:
                 self._broadcast(a)
+        return new_alerts
 
+    # ── Auto-check (live SCADA simulator schema) ────────────────────────────────
+
+    def check_scada_reading(self, reading: dict) -> list[dict]:
+        """Evaluate a live SCADA reading (pressure_hp, steam_hp, per-GTA
+        vibration/adm_*) against the SCADA-specific threshold set so that a
+        parameter falling under/over its nominal band raises an alert in real time.
+        Per-GTA fields are flattened from the ``gta`` sub-dict if present."""
+        flat = dict(reading)
+        # Flatten nested per-GTA data emitted by the SCADA simulator, e.g.
+        # reading["gta"]["GTA1"]["vib1"] -> vibration_gta1, adm_pression_gta1, ...
+        gta = reading.get("gta") if isinstance(reading.get("gta"), dict) else None
+        if gta:
+            for gta_id, prefix in (("GTA1", "gta1"), ("GTA2", "gta2"), ("GTA3", "gta3")):
+                sub = gta.get(gta_id)
+                if isinstance(sub, dict):
+                    flat[f"vibration_{prefix}"]   = max(
+                        float(sub.get("vib1", 0) or 0), float(sub.get("vib2", 0) or 0))
+                    if sub.get("adm_pression") is not None:
+                        flat[f"adm_pression_{prefix}"] = float(sub["adm_pression"])
+                    if sub.get("adm_temp") is not None:
+                        flat[f"adm_temp_{prefix}"] = float(sub["adm_temp"])
+                    if sub.get("rendement") is not None:
+                        flat[f"rendement_{prefix}"] = float(sub["rendement"])
+
+        new_alerts = self._check_thresholds(flat, _SCADA_THRESHOLDS)
+        if new_alerts:
+            insert_many("alerts", [_to_db(a) for a in new_alerts])
+            for a in new_alerts:
+                self._broadcast(a)
         return new_alerts
 
     # ── Manual alert ──────────────────────────────────────────────────────────

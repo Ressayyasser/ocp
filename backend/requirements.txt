@@ -36,7 +36,7 @@ openai>=1.30.0
 # psycopg2-binary>=2.9.9
 
 # ── Gymnasium (optional — custom env works without it) ────────────────────────
-# gymnasium>=0.29.0
+gymnasium>=0.29.0
 
 # ── Development / testing ─────────────────────────────────────────────────────
 pytest>=8.0.0

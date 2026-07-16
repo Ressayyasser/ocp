@@ -34,9 +34,13 @@ async def lifespan(app: FastAPI):
     def on_reading(reading: dict):
         app.state.latest_reading = reading
         try:
+            # Isolation Forest anomaly detection → alerts
             anomalies = detector.detect_all(reading)
             for anom in anomalies:
                 alerts.alert_from_anomaly(anom)
+            # Threshold-based checks on live SCADA parameters
+            # (HP steam flow/pressure, vibration, per-GTA admission, ...)
+            alerts.check_scada_reading(reading)
         except Exception:
             pass
 

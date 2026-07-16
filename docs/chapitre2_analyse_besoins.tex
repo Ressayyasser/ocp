@@ -1,0 +1,512 @@
+\clearpage % Force le début d'une nouvelle page
+\thispagestyle{empty} % Supprime l'en-tête, le pied de page et le numéro sur cette page
+
+\vspace*{\fill} % Ressort invisible pour centrer verticalement (pousse vers le bas)
+
+\begin{center}
+    \fontsize{30pt}{36pt}\selectfont \textbf{Chapitre 2} \\[1cm]
+    \fontsize{24.88pt}{30pt}\selectfont \textbf{Analyse des Besoins}
+\end{center}
+
+\vspace*{\fill}
+
+\refstepcounter{chapter} 
+\addcontentsline{toc}{chapter}{\protect\numberline{\thechapter}Analyse des Besoins}}
+
+\clearpage 
+
+%\minitoc  
+
+\bigskip
+
+\label{chap:besoin}
+% ----------------------------------------------------------------
+% INTRODUCTION DU CHAPITRE
+% ----------------------------------------------------------------
+\noindent
+Ce chapitre formalise l'ensemble des besoins du système \textbf{PCMCI-RL Cogénération}
+développé au sein de la Direction Production \& Sulfurique et Centrale (DPSC) d'OCP Jorf
+Lasfar. L'analyse s'appuie sur le Cahier des Charges v4 (CDC v4, mars 2026), les
+entretiens menés avec les ingénieurs d'exploitation, et les données disponibles issues
+du SCADA et des Revues Énergétiques ISO~50001.
+
+L'objectif est de dériver, à partir de la problématique industrielle décrite au
+Chapitre~\ref{chap:contexte}, un ensemble structuré de :
+\begin{enumerate}
+  \item \textbf{Besoins fonctionnels} — ce que le système \emph{doit faire} ;
+  \item \textbf{Besoins non fonctionnels} — les qualités que le système \emph{doit
+        posséder} ;
+  \item \textbf{Contraintes et exigences} — les limites imposées par l'environnement
+        technique, organisationnel et réglementaire.
+\end{enumerate}
+
+% ================================================================
+\section{Besoins Fonctionnels}
+\label{sec:besoins_fonctionnels}
+% ================================================================
+
+Les besoins fonctionnels sont organisés selon les cinq couches de l'architecture du
+système (voir Figure~\ref{fig:pipeline_global}) et hiérarchisés selon trois niveaux
+de priorité : \textbf{P1} (MVP — livrable obligatoire), \textbf{P2} (niveau
+publication) et \textbf{P3} (niveau prix/distinction).
+
+\begin{figure}[ht]
+    \centering
+    \includegraphics[width=\textwidth]{images/architecture_diagram.png}
+    \caption{Pipeline global et architecture en couches du système}
+    \label{fig:pipeline_global}
+\end{figure}
+
+% ----------------------------------------------------------------
+\subsection{Couche 1 — Ingestion, Prétraitement et Pipeline de Données}
+\label{subsec:bf_donnees}
+% ----------------------------------------------------------------
+
+La couche d'ingestion constitue le fondement du pipeline. Elle doit assurer la
+disponibilité, la qualité et la cohérence des données énergétiques avant tout
+traitement analytique.
+
+\begin{table}[H]
+\centering
+\caption{Besoins fonctionnels — Ingestion et Prétraitement (Priorité P1)}
+\label{tab:bf_donnees}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\ttfamily}p{0.7cm} X >{\centering\arraybackslash}p{1.5cm}}
+  \hcb{ID} & \hcb{Description du besoin} & \hcb{Priorité} \\
+  \midrule
+  \multicolumn{3}{l}{\cellcolor{Blue!10}\textbf{MVP – Ingestion et Prétraitement}} \\
+  \lc{F01} & \lc{\textbf{Chargement et persistance} : extraction automatique des données depuis les fichiers Excel historiques (feuilles «~Journalier GTA1/2/3~», 2022–2025) et stockage structuré dans une base SQLite (mode WAL).} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  F02 & \textbf{Validation et nettoyage} : exécution de contrôles qualité (Data Validator), traitement des valeurs aberrantes (clip ±4$\sigma$, bornage physique), gestion des valeurs manquantes par interpolation linéaire et remplissage médian. & \textcolor{Red}{\textbf{P1}} \\
+  \lc{F03} & \lc{\textbf{Feature Engineering} : création de nouvelles caractéristiques (ratios thermodynamiques, fenêtres glissantes, lags temporels, encodages cycliques mois/heure) pour enrichir l'apprentissage.} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  F04 & \textbf{Simulateur SCADA} : intégration d'un flux de données temps réel émulant les capteurs des turbines GTA (production, vapeur, pression, vibration, température), avec capacité d'injection de scénarios de panne (anomalie, endommagement, encrassement) pour tester les modèles. & \textcolor{Red}{\textbf{P1}} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+% ----------------------------------------------------------------
+\subsection{Couche 2 — Causalité Temporelle (PCMCI + Granger)}
+\label{subsec:bf_causalite}
+% ----------------------------------------------------------------
+
+Le module de causalité temporelle constitue le cœur scientifique différenciant du
+projet. Il remplace l'analyse corrélationnelle classique par une inférence causale
+rigoureuse, exploitant l'algorithme PCMCI~\cite{runge2019detecting} sur les séries
+temporelles quotidiennes multivariées de la cogénération.
+
+\begin{table}[H]
+\centering
+\caption{Besoins fonctionnels — Causalité Temporelle (Priorité P1)}
+\label{tab:bf_causalite}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\ttfamily}p{0.7cm} X >{\centering\arraybackslash}p{1.5cm}}
+  \hcb{ID} & \hcb{Description du besoin} & \hcb{Priorité} \\
+  \midrule
+  \multicolumn{3}{l}{\cellcolor{Blue!10}\textbf{MVP – Causalité Temporelle}} \\
+  \lc{F05} & \lc{Détection causale temporelle via l'algorithme \textbf{PCMCI+} (bibliothèque \texttt{tigramite}) sur $n=8$ variables énergétiques OCP (production, bilan\_net, steam\_hp, steam\_mp, pressure, vibration, temperature, efficiency), avec décalage maximal $\tau_{\max}$ configurable (par défaut 5 pas de temps) et sélection du seuil de signification $\alpha=0{,}05$ (\texttt{pc\_alpha}). Un \emph{fallback Granger} est prévu si \texttt{tigramite} n'est pas installé.} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  F06 & Validation croisée de la causalité par le test de \textbf{causalité de Granger multivariée} (utilisé à la fois comme fallback et comme validation indépendante des liens PCMCI, $p < 0{,}05$). & \textcolor{Red}{\textbf{P1}} \\
+  \lc{F07} & \lc{Visualisation interactive du \textbf{graphe orienté acyclique (DAG) causal temporel} avec liens retardés ($\tau = 0\ldots\tau_{\max}$), coloration par force du lien, et export JSON (NetworkX) pour intégration dans le dashboard Dash/Cytoscape.} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+\subsection*{Justification du choix de PCMCI+ face aux alternatives}
+\label{subsec:justif_pcmci}
+ 
+Le choix de l'algorithme PCMCI+ pour l'analyse causale temporelle n'est pas
+trivial : plusieurs méthodes concurrentes auraient pu être envisagées.  Le
+Tableau~\ref{tab:comp_causalite} présente une comparaison structurée des
+approches candidates évaluées en amont de ce projet.
+ 
+\begin{table}[H]
+\centering
+\caption{Comparaison des approches d'inférence causale temporelle pour données énergétiques}
+\label{tab:comp_causalite}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{0.19\textwidth} >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}X >{\centering\arraybackslash}p{0.08\textwidth}}
+  \hcb{Méthode} & \hcb{Points forts} & \hcb{Limites} & \hcb{Adéquation OCP} & \hcb{Retenu} \\
+  \midrule
+  \lc{\textbf{PCMCI+} (tigramite)} & \lc{Gère auto-corrélations, identifie liens contemporains et retardés, sélection de seuil $\alpha$.} & \lc{Sensible aux outliers non traités ; dépendance à \texttt{tigramite} (fallback Granger prévu).} & \lc{\textbf{Élevée} : séries quotidiennes multivariées, besoin de lag temporel (vapeur HP $\rightarrow$ turbines).} & \lc{\checkmark} \\
+  \textbf{VAR-Granger} & Simple, interprétable. & Détecte corrélation temporelle, pas causalité directe ; faux positifs élevés. & Moyenne : utilisé en \emph{validation croisée} et \emph{fallback} (F06). & Partiel \\
+  \lc{\textbf{LiNGAM}} & \lc{Identifie direction causale sans a priori, robuste aux non-gaussiennes.} & \lc{Ne gère pas nativement les dépendances retardées (séries temporelles).} & \lc{Faible : persistance temporelle incompatible avec LiNGAM direct.} & \lc{$\times$} \\
+  \textbf{NOTEARS} & Formulation continue, différentiable. & Conçu pour données statiques ; nécessite $n \gg p$. & Faible : peu d'observations disponibles. & $\times$ \\
+  \lc{\textbf{Corr. Pearson}} & \lc{Trivial à calculer.} & \lc{Ne distingue pas cause et effet.} & \lc{Nulle : l'objectif est la causalité racine.} & \lc{$\times$} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+% ----------------------------------------------------------------
+\subsection{Couche 3 — Analytique Prédictive (Prévisions, RUL et Anomalies)}
+\label{subsec:bf_anomalies}
+% ----------------------------------------------------------------
+
+Ce module exploite les modèles prédictifs et les scores d'anomalie pour anticiper le
+comportement de la centrale et discriminer les déviations statistiques normales des
+ruptures nécessitant une intervention.
+
+\begin{table}[H]
+\centering
+\caption{Besoins fonctionnels — Analytique Prédictive (Priorité P1–P2)}
+\label{tab:bf_anomalies}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\ttfamily}p{0.7cm} X >{\centering\arraybackslash}p{1.5cm}}
+  \hcb{ID} & \hcb{Description du besoin} & \hcb{Priorité} \\
+  \midrule
+  \multicolumn{3}{l}{\cellcolor{Blue!10}\textbf{MVP – Analytique Prédictive}} \\
+  \lc{F04b} & \lc{\textbf{Forecasting (XGBoost)} : Prédiction \emph{multi-cible} (bilan\_net, production, efficiency, steam\_hp) et \emph{multi-horizon} (24~h, 7~j, 30~j) avec quantification de confiance (R$^2$).} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  F08 & Détection d'anomalies par \textbf{Isolation Forest} structurée par groupes de variables opérationnelles (production, rendement, réseau de vapeur, thermodynamique, global), avec niveaux de sévérité (info / warning / critical) et identification de la cause principale. & \textcolor{Red}{\textbf{P1}} \\
+  \lc{F09} & \lc{Détection de \textbf{rupture de tendance / dérive} via le test CUSUM tabulaire (à deux sens) pour identifier l'usure ou la dégradation lente des performances.} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  \multicolumn{3}{l}{\cellcolor{LBlue!10}\textbf{Avancées – Analytique Prédictive}} \\
+  \lc{F09b} & \lc{\textbf{Moteur RUL (Remaining Useful Life)} : estimation de la santé (score 0–100) et de la durée de vie résiduelle (en jours) de 6 composants (Turbine\_HP, Rotor, Bearings, Valves, Condenser, Generator) via un \emph{modèle de dégradation linéaire} (RUL $\approx$ MTTF $\times$ santé$/100$).} & \lc{\textcolor{Orange}{\textbf{P2}}} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+\subsection*{Justification du choix Isolation Forest + CUSUM}
+\label{subsec:justif_anomalies}
+ 
+L'Isolation Forest détecte les \emph{anomalies ponctuelles} (pics de vibration, chutes de rendement) sur des groupes de variables opérationnelles, tandis que le CUSUM détecte les \emph{dérives progressives} (baisse de rendement, usure). Les deux méthodes opèrent sur les variables monitorées réelles et leurs scores alimentent ensuite le service d'alertes et l'état de l'agent RL — ce qui réduit les faux positifs liés aux simples corrélations opérationnelles normales.
+
+% ----------------------------------------------------------------
+\subsection{Couche 4 — Agent RL Prescriptif (Causal MDP)}
+\label{subsec:bf_rl_section}
+% ----------------------------------------------------------------
+
+Le module RL prescriptif constitue le composant de décision du système. Il opère sur un \textbf{Processus de Décision Markovien Causal} (Causal MDP) dont les transitions sont gouvernées par la dynamique de la cogénération.
+
+\subsubsection{Formalisation du Causal MDP}
+
+Le Causal MDP est défini comme un tuple $\mathcal{M} = \langle \mathcal{S}, \mathcal{A}, \mathcal{T}_c, \mathcal{R}, \gamma \rangle$ avec :
+
+\paragraph{Espace d'états $\mathcal{S}$}
+Vecteur normalisé de 9 variables issues des données OCP :
+\begin{equation}
+  s \;=\; \bigl[\,\texttt{production},\; \texttt{bilan\_net},\;
+                  \texttt{steam\_hp},\; \texttt{steam\_mp},\;
+                  \texttt{pressure},\; \texttt{vibration},\;
+                  \texttt{anomaly\_score},\; \texttt{efficiency},\; \texttt{month}\,\bigr]
+  \label{eq:state_space}
+\end{equation}
+
+\paragraph{Espace d'actions $\mathcal{A}$}
+11 actions prescriptives centrées sur les équipements de la centrale :
+\begin{enumerate}
+  \item Ne rien faire (\textit{baseline})
+  \item Augmenter la production GTA1
+  \item Augmenter la production GTA2
+  \item Augmenter la production GTA3
+  \item Augmenter la production GTAA
+  \item Optimiser le soutirage vapeur MP
+  \item Réduire les pertes de vapeur
+  \item Maintenance préventive GTA1
+  \item Maintenance préventive GTA2
+  \item Maintenance préventive GTA3
+  \item Activer la chaudière auxiliaire
+\end{enumerate}
+
+\paragraph{Fonction de récompense $\mathcal{R}$}
+\begin{equation}
+  r \;=\; \underbrace{1{,}0\cdot\Delta\texttt{bilan\_net}}_{\text{ISO 50001}}
+        + \underbrace{0{,}5\cdot\Delta\texttt{efficiency}}_{\text{performance}}
+        - \underbrace{0{,}3\cdot\texttt{coût\_action}}_{\text{opérationnel}}
+        - \underbrace{0{,}4\cdot\texttt{pénalité\_vibration}}_{\text{tag vibration}}
+        - \underbrace{1{,}0\cdot\texttt{pénalité\_anomalie}}_{\text{sécurité}}
+        - \underbrace{0{,}2\cdot\texttt{pénalité\_usure}}_{\text{usure turbines}}
+  \label{eq:reward}
+\end{equation}
+
+\begin{table}[H]
+\centering
+\caption{Besoins fonctionnels — Agent RL Prescriptif (Priorité P1–P2)}
+\label{tab:bf_rl_tableau_dedie}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\ttfamily}p{0.7cm} X >{\centering\arraybackslash}p{1.5cm}}
+  \hcb{ID} & \hcb{Description du besoin} & \hcb{Priorité} \\
+  \midrule
+  \multicolumn{3}{l}{\cellcolor{Blue!10}\textbf{MVP – Agent RL Prescriptif}} \\
+  \lc{F10} & \lc{Modélisation du \textbf{Causal MDP} (environnement compatible Gymnasium) avec intégration du \emph{score d'anomalie} (issu de la détection Isolation Forest/CUSUM) dans le vecteur d'observation.} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  F12 & \textbf{Backtesting} de la politique RL apprise sur des stratégies de référence (do\_nothing, random, dqn) ; gain cible vs politique aléatoire $\geq +30\,\%$ de récompense cumulée. & \textcolor{Red}{\textbf{P1}} \\
+  \multicolumn{3}{l}{\cellcolor{LBlue!10}\textbf{Avancées – Agent RL Prescriptif}} \\
+  \lc{F15} & \lc{Upgrade vers \textbf{Double DQN} (PyTorch) pour la gestion des états continus, avec \textbf{Prioritized Experience Replay} (buffer 100k, réseau 9$\rightarrow$256$\rightarrow$128$\rightarrow$64$\rightarrow$11, $\gamma=0{,}99$).} & \lc{\textcolor{Orange}{\textbf{P2}}} \\
+  F16 & Intégration de \textbf{SHAP TreeExplainer} pour l'explication de chaque recommandation RL (top-3 des variables contributives). & \textcolor{Orange}{\textbf{P2}} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+% ----------------------------------------------------------------
+\subsection{Couche 5 — Digital Twin, Assistant IA, Dashboard et API}
+\label{subsec:bf_twin}
+% ----------------------------------------------------------------
+
+\begin{table}[H]
+\centering
+\caption{Besoins fonctionnels — Applications, Interfaces \& Déploiement}
+\label{tab:bf_twin}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\ttfamily}p{0.7cm} X >{\centering\arraybackslash}p{1.5cm}}
+  \hcb{ID} & \hcb{Description du besoin} & \hcb{Priorité} \\
+  \midrule
+  \multicolumn{3}{l}{\cellcolor{Blue!10}\textbf{MVP – Applications \& Interfaces}} \\
+  \lc{F13} & \lc{\textbf{Dashboard Dash} multi-pages (10 vues) : Monitoring, Visualisation GTA, Digital Twin, Prédiction, Anomalies, DAG Causal, RUL \& Health, Agent RL, SHAP, Assistant IA (RAG).} & \lc{\textcolor{Red}{\textbf{P1}}} \\
+  F14 & API FastAPI et WebSockets : exposition des prédictions, des événements SCADA en temps réel et des alertes d'anomalies vers les interfaces. & \textcolor{Red}{\textbf{P1}} \\
+  \multicolumn{3}{l}{\cellcolor{LBlue!10}\textbf{Avancées – Digital Twin}} \\
+  \lc{F19} & \lc{\textbf{Simulation Monte Carlo / Digital Twin} : Simulateur What-If basé sur la thermodynamique avec quantification de l'incertitude (N=1000 itérations par défaut, jusqu'à 5000).} & \lc{\textcolor{Orange}{\textbf{P2}}} \\
+  \multicolumn{3}{l}{\cellcolor{Teal!8}\textbf{Différenciantes – Déploiement \& Architecture}} \\
+  F25 & \textbf{Alert Service} : génération, persistance et diffusion instantanée de notifications d'alertes (niveaux INFO / WARNING / CRITICAL) aux opérateurs. & \textcolor{Green}{\textbf{P3}} \\
+  \lc{F28} & \lc{\textbf{Assistant IA (RAG Chatbot)} : Modèle conversationnel NLP intégrant un LLM local (Ollama, \texttt{qwen2.5:7b} + embeddings \texttt{nomic-embed-text}) pour l'interrogation contextuelle (FR/EN) sur le statut live, les pannes et alertes, avec repli sur règles.} & \lc{\textcolor{Green}{\textbf{P3}}} \\
+  F29 & \textbf{Quantification d'impact économique} : calcul des DH économisés par recommandation suivie (conversion MWh $\rightarrow$ DH, tarif 700~DH/MWh), intégré au moteur de recommandation. & \textcolor{Green}{\textbf{P3}} \\
+  \lc{F30} & \lc{\textbf{Architecture Modulaire} : Découplage strict des modules (api/, data\_pipeline/, causal/, rl/, digital\_twin/, anomalies/, forecasting/, chatbot/) avec singletons partagés via \texttt{app.state} permettant l'extensibilité du Backend.} & \lc{\textcolor{Green}{\textbf{P3}}} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+% ================================================================
+\section{Besoins Non Fonctionnels}
+\label{sec:besoins_nf}
+% ================================================================
+
+Les besoins non fonctionnels définissent les \emph{qualités} que le système doit présenter indépendamment de ses fonctionnalités métier. Ils sont regroupés en catégories selon le modèle ISO/IEC~25010.
+
+% ----------------------------------------------------------------
+\subsection{Performance et Temps de Réponse}
+\label{subsec:bnf_perf}
+% ----------------------------------------------------------------
+
+\begin{table}[H]
+\centering
+\caption{Besoins non fonctionnels — Performance}
+\label{tab:bnf_perf}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}p{2.8cm} X >{\centering}p{1.6cm} >{\centering\arraybackslash}p{1.4cm}}
+  \hcb{KPI} & \hcb{Description} & \hcb{Seuil min.} & \hcb{Cible} \\
+  \midrule
+  \multicolumn{4}{l}{\cellcolor{Blue!10}\textbf{Spécifications \& SLAs de Performance}} \\
+  \lc{Temps réponse API} & \lc{Latence endpoint \texttt{/recommend}} & \lc{$< 500$~ms} & \lc{$< 200$~ms} \\
+  Temps Simul. MC & Simulation Monte Carlo (1000 trials) & $< 30$~s & $< 10$~s \\
+  \lc{MAPE prévision} & \lc{Erreur prévision bilan net $N{+}1$} & \lc{$< 15\,\%$} & \lc{$< 8\,\%$} \\
+  Gain RL vs aléatoire & $\Delta$récompense cumulée vs politique aléatoire & $+30\,\%$ & $+60\,\%$ \\
+  \lc{Gain RL vs inaction} & \lc{$\Delta$récompense vs action nulle} & \lc{$+15\,\%$} & \lc{$+40\,\%$} \\
+  Stabilité politique & Variance des actions sur 100 épisodes & $< 20\,\%$ & $< 10\,\%$ \\
+  \lc{Impact bilan net} & \lc{$\Delta$\texttt{bilan\_net}/mois (recommandations suivies)} & \lc{$+5\,000$~MWh} & \lc{$+15\,000$~MWh} \\
+  Délai alerte vibration & Temps détection anomalie via WebSocket & $\le 5$~min & $\le 1$~min \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+% ----------------------------------------------------------------
+\subsection{Fiabilité, Maintenabilité et Qualité du Code}
+\label{subsec:bnf_fiab}
+% ----------------------------------------------------------------
+
+\begin{itemize}
+  \item \textbf{Reproductibilité} : graines aléatoires fixées là où applicable (\texttt{random\_state=42} pour XGBoost, \texttt{seed=42} pour la simulation Monte Carlo).
+  \item \textbf{Robustesse} : le pipeline reste fonctionnel avec des NaN via \texttt{preprocessing.py} (interpolation, remplissage médian, clip ±4$\sigma$).
+  \item \textbf{Modularité Backend} : architecture stricte découplée (séparation \texttt{api/}, \texttt{data\_pipeline/}, \texttt{causal/}, \texttt{rl/}, \texttt{digital\_twin/}, \texttt{anomalies/}, \texttt{forecasting/}).
+  \item \textbf{Fallback automatique} : PCMCI $\rightarrow$ Granger si \texttt{tigramite} absent ; RAG $\rightarrow$ réponses à base de règles ; agent DQN non entraîné $\rightarrow$ conseil aléatoire ; aucune automatisation physique (système de recommandation \textit{Human-In-The-Loop}).
+\end{itemize}
+
+% ----------------------------------------------------------------
+\subsection{Utilisabilité et Explicabilité}
+\label{subsec:bnf_ux}
+% ----------------------------------------------------------------
+
+\begin{itemize}
+  \item \textbf{Accessibilité Opérateur} : dashboard intuitif conçu avec Dash Bootstrap Components (Thème sombre DARKLY).
+  \item \textbf{Explainability SHAP} : support visuel de chaque recommandation RL identifiant le top-3 des causes.
+  \item \textbf{Assistant Intégré} : module de Chat RAG local (Ollama) pour vulgariser les diagnostics complexes de l'IA, en français et en anglais.
+\end{itemize}
+
+% ================================================================
+\section{Contraintes et Exigences}
+\label{sec:contraintes}
+% ================================================================
+
+% ----------------------------------------------------------------
+\subsection{Périmètre Fonctionnel}
+\label{subsec:perimetre}
+% ----------------------------------------------------------------
+
+\begin{table}[H]
+\centering
+\caption{Périmètre fonctionnel — Inclus et exclus}
+\label{tab:perimetre}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{X X}
+  \cellcolor{green!15}\textbf{Inclus dans le périmètre} & \cellcolor{red!15}\textbf{Exclu du périmètre} \\
+  \midrule
+  Centrale thermo-électrique (GTA, réseau vapeur, condensats) & Atelier sulfurique \\
+  Sources de données : Historiques Excel, Sim SCADA Live, Base SQLite WAL & Connexion directe et intrusive aux automates PLC/DCS critiques en prod \\
+  Simulations Monte Carlo et Jumeau Numérique & Gestion RH, Achats \\
+  Dashboard Multi-pages (RUL, Causalité, RAG, Prédiction) & Actions automatisées non supervisées par l'humain \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+% ----------------------------------------------------------------
+\subsection{Contraintes Techniques}
+\label{subsec:contraintes_tech}
+% ----------------------------------------------------------------
+
+\begin{enumerate}
+  \item \textbf{Environnement logiciel} : Python 3.11+, PyTorch, environnement virtuel local.
+  \item \textbf{Stack technologique} :
+  \begin{itemize}
+    \item \textbf{Données} : \texttt{pandas}, \texttt{numpy}, \texttt{SQLite3}, \texttt{openpyxl}
+    \item \textbf{Causalité} : \texttt{tigramite} (PCMCI, optionnel — fallback Granger)
+    \item \textbf{ML/RL} : \texttt{scikit-learn}, \texttt{xgboost}, \texttt{torch} (PyTorch)
+    \item \textbf{Graphes} : \texttt{networkx}, \texttt{scipy}
+    \item \textbf{API/Web} : \texttt{FastAPI}, \texttt{Uvicorn}, \texttt{WebSockets}, \texttt{Dash}, \texttt{Plotly}, \texttt{Dash Bootstrap Components}
+    \item \textbf{NLP/Explicabilité} : \texttt{shap}, \texttt{Ollama} (LLM local, \texttt{gymnasium} optionnel)
+  \end{itemize}
+\end{enumerate}
+
+% ----------------------------------------------------------------
+\subsection{Contraintes Organisationnelles}
+\label{subsec:contraintes_orga}
+% ----------------------------------------------------------------
+
+\begin{enumerate}
+  \item \textbf{Durée} : 14 semaines effectives (avril – juillet 2026), avec 5 jalons formels.
+  \item \textbf{Validation} : validation obligatoire par la DPSC aux jalons clés.
+  \item \textbf{Sécurité} : Aucune automatisation physique (l'IA agit strictement comme un système de recommandation \textit{Human-In-The-Loop}).
+\end{enumerate}
+
+% ================================================================
+\section{Synthèse des Besoins}
+\label{sec:synthese_besoins}
+% ================================================================
+
+Le Tableau~\ref{tab:synthese} récapitule l'ensemble des besoins identifiés par niveau de priorité et par couche du système.
+
+\begin{table}[H]
+\centering
+\caption{Synthèse des besoins par priorité et couche}
+\label{tab:synthese}
+\begin{center}
+\scriptsize
+\begin{tabularx}{\textwidth}{>{\raggedright\arraybackslash}X >{\centering}p{1.8cm} >{\centering}p{2.4cm} >{\centering}p{2.4cm} >{\centering\arraybackslash}p{1.2cm}}
+  \hcb{Couche / Module} & \hcb{P1 (MVP)} & \hcb{P2 (Publication)} & \hcb{P3 (Distinction)} & \hcb{Total} \\
+  \midrule
+  \lc{Ingestion \& Pipeline de Données} & \lc{4} & \lc{0} & \lc{0} & \lc{4} \\
+  Causalité Temporelle & 3 & 0 & 0 & 3 \\
+  \lc{Analytique Prédictive} & \lc{3} & \lc{1} & \lc{0} & \lc{4} \\
+  Agent RL Prescriptif & 2 & 2 & 0 & 4 \\
+  \lc{Interfaces \& Services (API/RAG)} & \lc{2} & \lc{1} & \lc{4} & \lc{7} \\
+  \midrule
+  \textbf{Total} & \textbf{14} & \textbf{4} & \textbf{4} & \textbf{22} \\
+  \bottomrule
+\end{tabularx}
+\end{center}
+\end{table}
+
+\bigskip
+
+\noindent
+\textbf{Conclusion du chapitre}
+L'analyse des besoins a permis de structurer 22 fonctionnalités réparties sur 5 couches d'architecture (Ingestion, Causalité, Prédiction, Reinforcement Learning, Interfaces), tout en intégrant les contraintes techniques avancées (Double DQN PyTorch, Prioritized Experience Replay, FastAPI, Dash, Ollama, SHAP). Le Causal MDP formalisé — avec ses 9 variables d'état, ses 11 actions prescriptives et sa fonction de récompense — constitue la spécification centrale qui guidera la conception détaillée du système au Chapitre~\ref{chap:Conception}.
+
+% ================================================================
+\section*{Architecture des répertoires}
+% ================================================================
+
+L'arborescence ci-dessous reflète la structure réelle du dépôt, organisée en deux
+packages indépendants : \texttt{backend/} (API FastAPI, moteurs de calcul et
+simulateurs) et \texttt{frontend/} (application Dash multi-pages).
+
+\begin{verbatim}
+ocp-cogeneration-ai/
++-- backend/
+|   +-- api/
+|   |   +-- main.py            # Point d'entrée FastAPI (lifespan, singletons)
+|   |   +-- routes.py          # Endpoints REST (predict, recommend, simulate,
+|   |   |                      #   causal-graph, shap, rul, alerts, train, chat)
+|   |   +-- websocket.py       # WebSockets temps réel (/ws/realtime, /ws/alerts)
+|   +-- data_pipeline/
+|   |   +-- excel_loader.py    # Couche 1 — Chargement des classeurs Excel OCP
+|   |   +-- data_validator.py  # Contrôles qualité (Data Validator)
+|   |   +-- preprocessing.py   # Nettoyage, interpolation, clip outliers (±4σ)
+|   |   +-- feature_engineering.py  # Ratios, lags, fenêtres glissantes, cycliques
+|   |   +-- scada_loader.py    # Adaptateurs flux SCADA (CSV/JSON/WebSocket)
+|   |   +-- run_pipeline.py    # Orchestration du pipeline ETL
+|   +-- causal/
+|   |   +-- pcmci_engine.py    # Couche 2 — Causalité PCMCI+ (tigramite)
+|   |   +-- granger_validator.py  # Validation Granger (fallback + cross-check)
+|   |   +-- dag_builder.py     # Construction/export JSON + Cytoscape du DAG
+|   +-- anomalies/
+|   |   +-- isolation_forest_detector.py  # Couche 3 — Isolation Forest multi-groupes
+|   |   +-- cusum_detector.py  # CUSUM tabulaire (détection de dérive)
+|   +-- forecasting/
+|   |   +-- xgboost_predictor.py    # Couche 3 — XGBoost multi-cible/multi-horizon
+|   |   +-- predictor_service.py    # Service de prévision
+|   +-- rul/
+|   |   +-- rul_engine.py      # Couche 3 — RUL & santé (modèle dégradation linéaire)
+|   +-- rl/
+|   |   +-- environment.py     # Couche 4 — Environnement Causal MDP (Gym-compatible)
+|   |   +-- dqn_agent.py       # Agent Double DQN (PyTorch, PER)
+|   |   +-- replay_buffer.py   # Prioritized Experience Replay
+|   |   +-- reward_engine.py   # Décomposition + valorisation économique (DH)
+|   |   +-- trainer.py         # Entraînement + backtesting
+|   +-- recommendations/
+|   |   +-- recommendation_engine.py  # Fusion DQN + SHAP → recommandation
+|   +-- explainability/
+|   |   +-- shap_explainer.py  # SHAP TreeExplainer (XGBoost)
+|   +-- digital_twin/
+|   |   +-- simulator.py       # What-If thermodynamique
+|   |   +-- monte_carlo.py     # Simulation Monte Carlo (quantification incertitude)
+|   +-- chatbot/
+|   |   +-- rag_agent.py       # Assistant IA RAG (Ollama local, repli règles)
+|   +-- alerts/
+|   |   +-- alert_service.py   # Génération/diffusion d'alertes (INFO/WARN/CRIT)
+|   +-- scada_simulator/
+|   |   +-- simulator.py       # Boucle de simulation SCADA (1 Hz)
+|   |   +-- generators/        # production, pressure, vibration, temperature,
+|   |   |                      #   steam, anomaly_generator (injection de pannes)
+|   +-- scada/
+|   |   +-- app.py             # Dashboard Dash live du simulateur SCADA
+|   +-- database/
+|   |   +-- database.py        # SQLite (mode WAL) + schéma
+|   |   +-- models.py          # Modèles Pydantic (requêtes API)
+|   +-- data/
+|   |   +-- GTA_Donnees_Completes_2026_GENERATED.xlsx  # Historiques Excel
+|   +-- models/
+|   |   +-- forecasting/       # *.pkl + *_meta.json (bilan_net, production, ...)
+|   |   +-- anomaly/           # iforest_*.pkl (production, rendement, vapeur, ...)
+|   |   +-- rl/                # dqn_agent.pt + dqn_agent_meta.json
+|   +-- training_pipeline.py   # Pipeline d'entraînement global
+|   +-- requirements.txt
+|   +-- README.md
++-- frontend/
+|   +-- app.py                 # Application Dash principale (use_pages, sidebar)
+|   +-- api_client.py          # Client API FastAPI
+|   +-- pages/
+|   |   +-- monitoring.py      # Monitoring temps réel
+|   |   +-- gta_visualization.py  # Visualisation GTA (SVG live)
+|   |   +-- digital_twin.py    # Jumeau numérique (What-If)
+|   |   +-- prediction.py      # Prévisions XGBoost
+|   |   +-- anomaly.py         # Détection d'anomalies
+|   |   +-- dag.py             # Graphe causal interactif (Cytoscape)
+|   |   +-- rul.py             # RUL & Health
+|   |   +-- rl.py              # Agent RL (recommandations)
+|   |   +-- shap.py            # Explicabilité SHAP
+|   |   +-- chatbot.py         # Assistant IA (RAG)
+|   +-- utils/                 # api_client, styles
+|   +-- assets/                # css, logo
+|   +-- requirements.txt
++-- docs/                      # Diagrammes (PlantUML, PNG), architecture
++-- Dockerfile
+\end{verbatim}

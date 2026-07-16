@@ -46,7 +46,8 @@ htmlcov/
 
 # MyPy
 .mypy_cache/
-
+*.svg
+*.png
 # Environment variables
 # .env
 # .env.*

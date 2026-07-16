@@ -58,3 +58,68 @@ body {
 
 /* Badge */
 .badge { font-size: 0.75rem; }
+
+/* GTA synoptic — clickable equipment overlays */
+.gta-equip-overlay {
+    background: transparent;
+    border-radius: 14px;
+    transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.gta-equip-overlay:hover {
+    background: rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+.gta-equip-overlay:active {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+/* Real-time alert toasts (WebSocket driven) */
+.alert-toast {
+    color: #1a1a2e;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin: 0;
+    box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55);
+    opacity: 0;
+    transform: translateX(60px) scale(0.85);
+    transition: opacity 0.35s ease, transform 0.35s cubic-bezier(.2,.9,.3,1.4);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    cursor: pointer;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+}
+.alert-toast.show {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    animation: alertShake 0.5s ease 0.1s;
+}
+.alert-toast-icon { font-size: 1.5rem; line-height: 1.1; }
+.alert-toast-close { font-size: 1.1rem; cursor: pointer; opacity: 0.7; }
+.alert-toast-close:hover { opacity: 1; }
+
+/* Critical alerts demand attention: bigger + pulsing */
+.alert-toast-critical {
+    border-width: 3px;
+    font-weight: 600;
+}
+.alert-toast-critical.alert-toast-flash {
+    animation: alertShake 0.5s ease 0.1s, alertFlash 1s ease-in-out 0.7s 3;
+}
+@keyframes alertShake {
+    0%, 100% { transform: translateX(0) scale(1); }
+    20% { transform: translateX(-8px) scale(1.03); }
+    40% { transform: translateX(8px) scale(1.03); }
+    60% { transform: translateX(-5px) scale(1.02); }
+    80% { transform: translateX(5px) scale(1.02); }
+}
+@keyframes alertFlash {
+    0%, 100% { box-shadow: 0 10px 26px rgba(0, 0, 0, 0.55); }
+    50% { box-shadow: 0 0 0 6px rgba(255, 77, 77, 0.55), 0 10px 26px rgba(0, 0, 0, 0.55); }
+}
+
+/* Mute toggle (bottom-right) */
+#alert-mute-btn {
+    font-size: 0.8rem;
+    border: 1px solid #555;
+    border-radius: 20px;
+    cursor: pointer;
+}

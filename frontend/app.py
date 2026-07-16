@@ -7,6 +7,8 @@ import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
 
+from utils.alert_toast import register_alert_toast
+
 app = dash.Dash(
     __name__,
     use_pages=True,
@@ -20,7 +22,7 @@ server = app.server  # for gunicorn
 sidebar = dbc.Nav(
     [
         html.Div([
-            html.Img(src="/assets/ocp_logo.png", height="48px",
+            html.Img(src="/assets/ocp_logo.svg", height="56px",
                      style={"marginBottom": "8px"},
                      className="d-block mx-auto"),
             html.H6("OCP Cogénération", className="text-center text-light fw-bold mb-0"),
@@ -81,6 +83,9 @@ app.layout = dbc.Container(
     fluid=True,
     className="p-0",
 )
+
+# Mount the app-wide real-time alert toast (WebSocket driven)
+register_alert_toast(app, api_base="http://localhost:8000")
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8050)
