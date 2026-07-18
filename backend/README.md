@@ -25,6 +25,28 @@ python training_pipeline.py --phase all --data_dir data
 uvicorn api.main:app --reload --port 8000
 ```
 
+## Tests
+
+```bash
+cd backend
+python -m pytest tests                    # full suite (unit + API smoke tests)
+python -m pytest tests --cov=. -q         # with coverage report (target ≥ 65 %)
+```
+
+Tests run against a temporary SQLite database and a temporary model
+directory (`DB_PATH` / `MODEL_DIR` env vars) — they never touch
+`cogen_ocp.db` or `models/`.
+
+## Docker
+
+```bash
+# From the repository root
+docker compose up --build
+# Backend  → http://localhost:8000   (OpenAPI docs at /docs)
+# Frontend → http://localhost:8050
+# Optional local LLM (chatbot): docker compose exec ollama ollama pull qwen2.5:7b
+```
+
 ## API Endpoints
 
 | Method | Path               | Description                        |
@@ -72,7 +94,7 @@ backend/
 ├── explainability/    SHAP TreeExplainer
 ├── recommendations/   Recommendation engine
 ├── digital_twin/      What-if simulator + Monte Carlo
-├── chatbot/           RAG agent (OpenAI / rule-based fallback)
+├── chatbot/           RAG agent (Ollama qwen2.5:7b / rule-based fallback)
 ├── alerts/            Alert service with WebSocket broadcast
 ├── rul/               RUL engine (Phase 3)
 ├── scada_simulator/   Real-time sensor simulator + fault injection

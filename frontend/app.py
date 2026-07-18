@@ -3,6 +3,8 @@ app.py — Dash multi-page application entry point.
 Connects to the FastAPI backend at API_BASE_URL.
 """
 
+import os
+
 import dash
 from dash import dcc, html
 import dash_bootstrap_components as dbc
@@ -85,7 +87,7 @@ app.layout = dbc.Container(
 )
 
 # Mount the app-wide real-time alert toast (WebSocket driven)
-register_alert_toast(app, api_base="http://localhost:8000")
+register_alert_toast(app, api_base=os.environ.get("API_BASE_URL", "http://localhost:8000"))
 
 if __name__ == "__main__":
     app.run(debug=True, host="0.0.0.0", port=8050)

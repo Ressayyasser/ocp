@@ -11,6 +11,7 @@ import pandas as pd
 from forecasting.xgboost_predictor import XGBoostPredictor
 from data_pipeline.feature_engineering import add_all_features
 from data_pipeline.preprocessing import clean_dataframe
+from data_pipeline.live_data import get_combined_daily_df
 from database.database import query, insert_many
 
 
@@ -20,10 +21,11 @@ class PredictorService:
         self.predictor = XGBoostPredictor()
 
     def _load_df(self) -> pd.DataFrame:
-        rows = query("SELECT * FROM historical_data ORDER BY timestamp")
-        if not rows:
+        # Historical Excel data extended with daily simulation_data aggregates,
+        # so predictions anchor at the present day instead of the last Excel row.
+        df = get_combined_daily_df(limit=100000)
+        if df.empty:
             raise ValueError("No historical data in DB — run excel_loader first")
-        df = pd.DataFrame(rows)
         df = clean_dataframe(df)
         df = add_all_features(df)
         return df

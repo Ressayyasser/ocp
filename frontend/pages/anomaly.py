@@ -4,13 +4,13 @@ Shows Isolation Forest scores, CUSUM alerts, and historical anomaly log.
 """
 
 import dash
-from dash import dcc, html, Input, Output, callback
+from dash import dcc, html, Input, Output, callback, ctx
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import pandas as pd
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from api_client import get_anomalies, get_historical, get_alerts
+from api_client import get_anomalies, get_historical, get_alerts, rescan_anomalies
 
 dash.register_page(__name__, path="/anomalies", name="Anomalies", title="Anomalies")
 
@@ -22,6 +22,14 @@ layout = html.Div([
             className="text-light fw-bold mb-4"),
 
     dcc.Interval(id="anom-interval", interval=15_000, n_intervals=0),
+
+    # Scan controls
+    html.Div([
+        dbc.Button("🔍 Relancer l'analyse (Isolation Forest + CUSUM)",
+                   id="anom-rescan-btn", color="warning", size="sm",
+                   className="me-3"),
+        html.Span(id="anom-scan-status", className="text-muted small"),
+    ], className="mb-3 d-flex align-items-center"),
 
     # Summary badges
     dbc.Row(id="anom-summary", className="mb-4"),
@@ -69,13 +77,27 @@ layout = html.Div([
     Output("anom-severity-bar",  "figure"),
     Output("anom-table",         "children"),
     Output("anom-count-badge",   "children"),
+    Output("anom-scan-status",   "children"),
     Input("anom-interval", "n_intervals"),
+    Input("anom-rescan-btn", "n_clicks"),
 )
-def update_anomalies(n):
+def update_anomalies(n, n_rescan):
     dark = dict(paper_bgcolor="#1a1a2e", plot_bgcolor="#1a1a2e",
                 font=dict(color="#e0e0e0"), margin=dict(l=40, r=20, t=20, b=40))
 
-    anom_resp = get_anomalies(200)
+    scan_status = ""
+    if ctx.triggered_id == "anom-rescan-btn" and n_rescan:
+        res = rescan_anomalies()
+        if isinstance(res, dict) and "error" not in res:
+            det = res.get("by_detector", {})
+            scan_status = (f"Analyse terminée : {res.get('count', 0)} anomalies "
+                           f"(Isolation Forest {det.get('isolation_forest', 0)} · "
+                           f"CUSUM {det.get('cusum', 0)}) "
+                           f"sur {res.get('window_days', '—')} jours.")
+        else:
+            scan_status = f"Échec de l'analyse : {res.get('error', '?')}"
+
+    anom_resp = get_anomalies(500)
     hist_resp = get_historical(30)
 
     # 🔥 FIX: Extract lists safely from the dictionary responses returned by the API
@@ -112,29 +134,37 @@ def update_anomalies(n):
         ])], className="bg-dark border-info text-center"), width=3),
     ]
 
-    # ── Score timeline ──────────────────────────────────────────────────────────
+    # ── Score timeline (Isolation Forest vs CUSUM) ─────────────────────────────
     fig_score = go.Figure()
-    if hist and anomalies:
-        df_h = pd.DataFrame(hist)
-        if "timestamp" in df_h.columns:
-            df_h["timestamp"] = pd.to_datetime(df_h["timestamp"])
-            
+    if anomalies:
         df_a = pd.DataFrame(anomalies)
         if "timestamp" in df_a.columns and "score" in df_a.columns:
-            df_a["timestamp"] = pd.to_datetime(df_a["timestamp"])
-            df_a = df_a.sort_values("timestamp")
-            fig_score.add_trace(go.Scatter(
-                x=df_a["timestamp"], y=df_a["score"],
-                mode="lines+markers", name="Score anomalie",
-                line=dict(color="#ff6b6b", width=2),
-                marker=dict(size=5),
-            ))
+            df_a["timestamp"] = pd.to_datetime(df_a["timestamp"], errors="coerce",
+                                               format="mixed")
+            df_a = df_a.dropna(subset=["timestamp"]).sort_values("timestamp")
+            cause = df_a.get("cause", pd.Series("", index=df_a.index)).astype(str)
+            df_if    = df_a[cause.str.startswith("Isolation")]
+            df_cusum = df_a[cause.str.startswith("CUSUM")]
+
+            if not df_if.empty:
+                fig_score.add_trace(go.Scatter(
+                    x=df_if["timestamp"], y=df_if["score"],
+                    mode="markers", name="Isolation Forest",
+                    marker=dict(size=7, color="#ff6b6b", symbol="circle"),
+                ))
+            if not df_cusum.empty:
+                fig_score.add_trace(go.Scatter(
+                    x=df_cusum["timestamp"], y=df_cusum["score"],
+                    mode="markers", name="CUSUM (dérive)",
+                    marker=dict(size=9, color="#ffb84d", symbol="diamond"),
+                ))
             # Threshold reference
             fig_score.add_hline(y=-0.3, line_dash="dash",
                                 line_color="#ffd93d", annotation_text="Seuil warning")
             fig_score.add_hline(y=-0.5, line_dash="dash",
                                 line_color="#ff4d4d", annotation_text="Seuil critique")
-    fig_score.update_layout(**dark, yaxis_title="Score (plus négatif = plus anormal)")
+    fig_score.update_layout(**dark, yaxis_title="Score (plus négatif = plus anormal)",
+                            legend=dict(orientation="h", y=1.12))
 
     # ── Pie by group ───────────────────────────────────────────────────────────
     fig_pie = go.Figure()
@@ -184,7 +214,16 @@ def update_anomalies(n):
             bordered=True, color="dark", hover=True, size="sm",
         )
     else:
-        table = html.P("Aucune anomalie détectée dans la base de données. (Assurez-vous que le détecteur Isolation Forest a été entraîné et a généré des alertes).", 
+        table = html.P("Aucune anomalie détectée — cliquez sur « Relancer l'analyse » "
+                       "pour lancer le balayage Isolation Forest + CUSUM.",
                        className="text-success text-center py-3")
 
-    return summary, fig_score, fig_pie, fig_bar, table, str(n_total)
+    if not scan_status and anomalies:
+        n_if    = sum(1 for a in anomalies
+                      if str(a.get("cause", "")).startswith("Isolation"))
+        n_cusum = sum(1 for a in anomalies
+                      if str(a.get("cause", "")).startswith("CUSUM"))
+        scan_status = (f"{n_total} anomalies en base — "
+                       f"Isolation Forest {n_if} · CUSUM {n_cusum}")
+
+    return summary, fig_score, fig_pie, fig_bar, table, str(n_total), scan_status

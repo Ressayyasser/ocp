@@ -27,8 +27,10 @@ from digital_twin.simulator                     import DigitalTwinSimulator
 from digital_twin.monte_carlo                   import MonteCarloSimulator
 from data_pipeline.preprocessing                import clean_dataframe
 from data_pipeline.feature_engineering          import add_all_features
+from data_pipeline.live_data                    import get_combined_daily_df
 from rul.rul_engine                             import RULEngine
 from chatbot.rag_agent                          import RAGAgent
+from anomalies.anomaly_service                  import AnomalyScanService
 
 
 import pandas as pd
@@ -73,10 +75,11 @@ def _get_dt():
 
 
 def _get_df():
-    rows = query("SELECT * FROM historical_data ORDER BY timestamp DESC LIMIT 2000")
-    if not rows:
+    # Historical Excel data + daily aggregates of simulation_data, so the
+    # series stays continuous up to the present day (gap auto-backfilled).
+    df = get_combined_daily_df(limit=2000)
+    if df.empty:
         return pd.DataFrame()
-    df = pd.DataFrame(rows)
     df = clean_dataframe(df)
     df = add_all_features(df)
     return df
@@ -101,6 +104,16 @@ def _get_mc():
     if _mc_sim is None:
         _mc_sim = MonteCarloSimulator(n_trials=500, seed=42)
     return _mc_sim
+
+
+_anomaly_scanner: AnomalyScanService | None = None
+
+
+def _get_anomaly_scanner():
+    global _anomaly_scanner
+    if _anomaly_scanner is None:
+        _anomaly_scanner = AnomalyScanService()
+    return _anomaly_scanner
 
 # ── Health ─────────────────────────────────────────────────────────────────────
 
@@ -249,14 +262,35 @@ def predictions_all():
 
 # ── Anomalies ──────────────────────────────────────────────────────────────────
 
+def _run_anomaly_scan(window_days: int = 365) -> dict:
+    return _get_anomaly_scanner().scan_and_store(_get_df(), window_days)
+
+
 @router.get("/anomalies")
 def anomalies(limit: int = 50, severity: str | None = None):
+    # Lazy first scan: the anomalies table is derived data — populate it from
+    # the batch Isolation Forest + CUSUM sweep if nothing has been stored yet.
+    if query("SELECT COUNT(*) AS c FROM anomalies")[0]["c"] == 0:
+        try:
+            _run_anomaly_scan()
+        except Exception as exc:
+            print(f"[anomalies] auto-scan failed: {exc}")
+
     if severity:
         rows = query("SELECT * FROM anomalies WHERE severity=? ORDER BY timestamp DESC LIMIT ?",
                      [severity, limit])
     else:
         rows = query("SELECT * FROM anomalies ORDER BY timestamp DESC LIMIT ?", [limit])
-    return {"anomalies": rows, "count": len(rows)}
+    return {"anomalies": sanitize_for_json(rows), "count": len(rows)}
+
+
+@router.post("/anomalies/scan")
+def anomalies_scan(window_days: int = 365):
+    """Re-run the batch Isolation Forest + CUSUM sweep and refresh the table."""
+    try:
+        return sanitize_for_json(_run_anomaly_scan(window_days))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 # ── Causal graph ───────────────────────────────────────────────────────────────
 
@@ -435,9 +469,53 @@ def get_historical(days: int = 30):
         if df.empty:
             return {"data": [], "count": 0}
         
-        n_rows = min(len(df), days * 48)  # Calculates estimation limits assuming 30-min entries
+        n_rows = min(len(df), max(int(days), 1))  # combined series is daily (1 row/day)
         data = df.tail(n_rows).replace([np.inf, -np.inf], np.nan).to_dict(orient="records")
         return sanitize_for_json({"data": data, "count": len(data)})
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/data/daily/{gta}")
+def get_daily_gta(gta: str, days: int = 60):
+    """Per-GTA daily telemetry for the GTA synoptic page (fallback when the
+    live SCADA simulator on :8051 is not running). Maps the per-GTA columns
+    of the combined daily series onto the live telemetry schema."""
+    idx = {"GTA1": 1, "GTA2": 2, "GTA3": 3}.get(gta.upper())
+    if idx is None:
+        raise HTTPException(400, f"Unknown GTA '{gta}' — expected GTA1, GTA2 or GTA3")
+    try:
+        df = _get_df()
+        if df.empty:
+            return {"data": [], "gta": gta.upper(), "count": 0}
+        recent = df.tail(max(int(days), 1))
+
+        def val(row, col):
+            v = row.get(col)
+            if v is None or (isinstance(v, float) and (np.isnan(v) or np.isinf(v))):
+                return None
+            return round(float(v), 3)
+
+        records = []
+        for _, r in recent.iterrows():
+            records.append({
+                "date":          str(r.get("timestamp"))[:10],
+                "adm_debit":     val(r, f"debit_adm_gta{idx}"),
+                "adm_temp":      val(r, f"temp_adm_gta{idx}"),
+                "adm_pression":  val(r, f"pression_adm_gta{idx}"),
+                "sout_debit":    val(r, f"debit_sout_gta{idx}"),
+                "sout_pression": 8.9,           # nominal — not tracked daily
+                "ext_debit":     val(r, f"debit_ext_gta{idx}"),
+                "ext_pression":  0.09,          # nominal condenser vacuum
+                "puissance_mw":  val(r, f"gta{idx}"),   # MWh/day (page divides by 24)
+                "energie_mwh":   val(r, f"gta{idx}"),
+                "rendement":     val(r, f"rendement_gta{idx}"),
+                "source":        r.get("source", "historical"),
+            })
+        return sanitize_for_json({"data": records, "gta": gta.upper(),
+                                  "count": len(records)})
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     

@@ -48,7 +48,8 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
       7. Clip extreme outliers beyond ±4σ
     """
     df = df.copy()
-    exclude_cols = ['Date', 'timestamp', 'Mois']
+    # 'source' tags the row origin (historical | live_sim) — keep it textual
+    exclude_cols = ['Date', 'timestamp', 'Mois', 'source']
     
     # ── Timestamp ─────────────────────────────────────────────────────────────
     if "timestamp" in df.columns:

@@ -59,6 +59,10 @@ def get_anomalies(limit: int = 50, severity: str = None):
         params["severity"] = severity
     return _get("/anomalies", params=params)
 
+def rescan_anomalies(window_days: int = 365):
+    """Re-run the batch Isolation Forest + CUSUM sweep on the backend."""
+    return _post(f"/anomalies/scan?window_days={window_days}")
+
 def get_alerts(limit: int = 50):
     return _get("/alerts", params={"limit": limit})
 

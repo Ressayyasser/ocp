@@ -29,8 +29,6 @@ layout = html.Div([
                 options=[{"label": v.replace("_", " ").title(), "value": v} for v in VARIABLES],
                 value="production",
                 clearable=False,
-                className="dash-dark-dropdown",
-                style={"backgroundColor": "#2a2a3e", "color": "#fff"},
             ),
         ], width=4),
         dbc.Col([
@@ -40,7 +38,6 @@ layout = html.Div([
                 options=[{"label": h, "value": h} for h in HORIZONS],
                 value="7d",
                 clearable=False,
-                style={"backgroundColor": "#2a2a3e", "color": "#fff"},
             ),
         ], width=3),
         dbc.Col([
@@ -91,40 +88,76 @@ def update_prediction(variable, horizon, days, _):
     # FIX: The API returns {"data": [...], "count": N}, so we must extract the "data" key
     hist_data = hist_resp.get("data", []) if isinstance(hist_resp, dict) else hist_resp
 
-    # Historical trace
+    # Historical traces — Excel history (green) vs recent live/simulated
+    # SCADA-derived days (cyan), split on the backend-provided 'source' tag.
+    last_ts, last_val = None, None
     if isinstance(hist_data, list) and hist_data:
         df = pd.DataFrame(hist_data)
         if "timestamp" in df.columns:
             df["timestamp"] = pd.to_datetime(df["timestamp"])
+            df = df.sort_values("timestamp")
             if variable in df.columns:
-                fig.add_trace(go.Scatter(
-                    x=df["timestamp"], y=df[variable],
-                    mode="lines", name="Historique",
-                    line=dict(color="#6bcb77", width=2),
-                ))
+                if "source" in df.columns:
+                    hist_df = df[df["source"] != "live_sim"]
+                    live_df = df[df["source"] == "live_sim"]
+                else:
+                    hist_df, live_df = df, df.iloc[0:0]
 
-    # Prediction trace
+                if not hist_df.empty:
+                    fig.add_trace(go.Scatter(
+                        x=hist_df["timestamp"], y=hist_df[variable],
+                        mode="lines", name="Historique (Excel)",
+                        line=dict(color="#6bcb77", width=2),
+                    ))
+                if not live_df.empty:
+                    # bridge point so the two segments join without a gap
+                    if not hist_df.empty:
+                        live_df = pd.concat([hist_df.tail(1), live_df])
+                    fig.add_trace(go.Scatter(
+                        x=live_df["timestamp"], y=live_df[variable],
+                        mode="lines", name="Temps réel (SCADA/simulation)",
+                        line=dict(color="#39c5cf", width=2),
+                    ))
+
+                last_ts  = df["timestamp"].iloc[-1]
+                last_val = df[variable].iloc[-1]
+
+    # "Today" marker at the end of the observed series
+    if last_ts is not None:
+        fig.add_shape(type="line", x0=last_ts, x1=last_ts, y0=0, y1=1,
+                      yref="paper", line=dict(color="#8b949e", width=1.5, dash="dot"))
+        fig.add_annotation(x=last_ts, y=1.04, yref="paper", showarrow=False,
+                           text=f"Aujourd'hui ({last_ts.strftime('%d/%m/%Y')})",
+                           font=dict(color="#8b949e", size=11))
+
+    # Forecast curve — every horizon up to the selected one, anchored at today
     cards = []
     if isinstance(pred, dict) and "error" not in pred:
         pred_val = pred.get("predicted_value")
         conf     = pred.get("confidence", 0)
-        ts       = pred.get("timestamp", "")
 
-        if pred_val is not None and isinstance(hist_data, list) and hist_data:
-            last_ts = pd.to_datetime(hist_data[-1]["timestamp"])
-            
-            # Safely parse horizon string (e.g., "1d", "7d") to Timedelta
-            try:
-                delta = pd.Timedelta(horizon)
-            except ValueError:
-                delta = pd.Timedelta(days=7)
+        if pred_val is not None and last_ts is not None:
+            horizons_needed = HORIZONS[:HORIZONS.index(horizon) + 1] \
+                if horizon in HORIZONS else [horizon]
+            xs = [last_ts]
+            ys = [last_val if last_val is not None else pred_val]
+            for h in horizons_needed:
+                p = pred if h == horizon else get_predictions(variable, h)
+                if not isinstance(p, dict) or "error" in p \
+                        or p.get("predicted_value") is None:
+                    continue
+                try:
+                    delta = pd.Timedelta(h)
+                except ValueError:
+                    delta = pd.Timedelta(days=7)
+                xs.append(last_ts + delta)
+                ys.append(p["predicted_value"])
 
             fig.add_trace(go.Scatter(
-                x=[last_ts, last_ts + delta],
-                y=[hist_data[-1].get(variable, pred_val), pred_val],
-                mode="lines+markers", name=f"Prévision {horizon}",
+                x=xs, y=ys,
+                mode="lines+markers", name=f"Prévision (jusqu'à {horizon})",
                 line=dict(color="#f0c040", width=2, dash="dash"),
-                marker=dict(size=10, symbol="diamond"),
+                marker=dict(size=9, symbol="diamond"),
             ))
 
         cards = [

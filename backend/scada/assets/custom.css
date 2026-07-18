@@ -1,0 +1,132 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   GTA SCADA Simulator — dark theme fixes
+   dcc.Dropdown (Dash 4 radix-based) + sliders: make the selected value
+   readable and match the DARKLY application background.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+body {
+    background-color: #222;
+}
+
+/* ── dcc.Dropdown trigger button (closed state) ── */
+.dash-dropdown {
+    background-color: #2a2a3e !important;
+    border: 1px solid #444a63 !important;
+    border-radius: 6px !important;
+    color: #e0e0e0 !important;
+    min-height: 36px;
+    width: 100%;
+    text-align: left;
+}
+.dash-dropdown:hover {
+    border-color: #f0c040 !important;
+}
+.dash-dropdown[data-state="open"] {
+    border-color: #f0c040 !important;
+    box-shadow: 0 0 0 2px rgba(240, 192, 64, 0.25);
+}
+
+/* Selected value text — must always be readable */
+.dash-dropdown .dash-dropdown-value,
+.dash-dropdown .dash-dropdown-value-item,
+.dash-dropdown .dash-dropdown-value-item span {
+    color: #e0e0e0 !important;
+    font-weight: 500;
+}
+.dash-dropdown .dash-dropdown-placeholder {
+    color: #8b949e !important;
+}
+.dash-dropdown .dash-dropdown-trigger-icon,
+.dash-dropdown .dash-dropdown-clear-icon {
+    color: #8b949e !important;
+}
+
+/* ── Opened menu (radix portal) ── */
+.dash-dropdown-content {
+    background-color: #232338 !important;
+    border: 1px solid #444a63 !important;
+    border-radius: 6px !important;
+    color: #e0e0e0 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6) !important;
+}
+.dash-dropdown-content .dash-dropdown-search-container {
+    border-bottom: 1px solid #444a63;
+}
+.dash-dropdown-content .dash-dropdown-search {
+    background-color: #2a2a3e !important;
+    color: #e0e0e0 !important;
+    border: none !important;
+}
+.dash-dropdown-content .dash-dropdown-search::placeholder {
+    color: #8b949e;
+}
+.dash-dropdown-content .dash-dropdown-search-icon {
+    color: #8b949e !important;
+}
+
+/* Options */
+.dash-dropdown-option,
+.dash-options-list-option {
+    color: #e0e0e0 !important;
+    background-color: transparent !important;
+    cursor: pointer;
+}
+.dash-dropdown-option:hover,
+.dash-options-list-option:hover,
+.dash-dropdown-option[data-highlighted],
+.dash-options-list-option.focused {
+    background-color: #3d3d5c !important;
+}
+.dash-dropdown-option.selected,
+.dash-options-list-option.selected {
+    background-color: rgba(240, 192, 64, 0.16) !important;
+    color: #f0c040 !important;
+    font-weight: 600;
+}
+.dash-dropdown-option input[type="radio"],
+.dash-dropdown-option input[type="checkbox"],
+.dash-options-list-option input[type="radio"],
+.dash-options-list-option input[type="checkbox"] {
+    accent-color: #f0c040;
+}
+.dash-dropdown-content .dash-dropdown-no-results {
+    color: #8b949e !important;
+}
+
+/* ── Sliders (Dash 4 "dash-slider-*" classes): readable marks + tooltip ── */
+.dash-slider-mark {
+    color: #8b949e !important;
+}
+.dash-slider-track {
+    background-color: #444a63 !important;
+}
+.dash-slider-range {
+    background-color: #f0c040 !important;
+}
+.dash-slider-thumb {
+    border-color: #f0c040 !important;
+    background-color: #2a2a3e !important;
+}
+.dash-slider-tooltip {
+    background-color: #f0c040 !important;
+    color: #1a1a2e !important;
+    font-weight: 700;
+    border: none !important;
+    border-radius: 4px;
+}
+.dash-slider-tooltip::after,
+.dash-slider-tooltip .dash-slider-tooltip-arrow {
+    border-top-color: #f0c040 !important;
+    border-bottom-color: #f0c040 !important;
+}
+
+/* Legacy rc-slider fallback (older Dash builds) */
+.rc-slider-mark-text        { color: #8b949e !important; }
+.rc-slider-mark-text-active { color: #e0e0e0 !important; }
+.rc-slider-track            { background-color: #f0c040 !important; }
+.rc-slider-handle           { border-color: #f0c040 !important;
+                              background-color: #2a2a3e !important; }
+.rc-slider-tooltip-inner    { background-color: #f0c040 !important;
+                              color: #1a1a2e !important; font-weight: 700;
+                              border: none !important; }
+.rc-slider-tooltip-arrow    { border-top-color: #f0c040 !important; }

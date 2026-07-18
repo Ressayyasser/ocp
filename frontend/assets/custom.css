@@ -123,3 +123,112 @@ body {
     border-radius: 20px;
     cursor: pointer;
 }
+/* ── Virtual GTA Twin (digital twin sandbox) ─────────────────────────────── */
+@keyframes vgta-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.25; }
+}
+.vgta-lamp-on {
+    animation: vgta-blink 0.9s infinite;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   dcc.Dropdown — global dark theme (Dash 4 radix-based dropdown)
+   Makes the selected value readable and matches the app background.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Trigger button (closed dropdown) */
+.dash-dropdown {
+    background-color: #2a2a3e !important;
+    border: 1px solid #444a63 !important;
+    border-radius: 6px !important;
+    color: #e0e0e0 !important;
+    min-height: 36px;
+    width: 100%;
+    text-align: left;
+}
+.dash-dropdown:hover {
+    border-color: #f0c040 !important;
+}
+.dash-dropdown[data-state="open"] {
+    border-color: #f0c040 !important;
+    box-shadow: 0 0 0 2px rgba(240, 192, 64, 0.25);
+}
+
+/* Selected value text — must always be readable */
+.dash-dropdown .dash-dropdown-value,
+.dash-dropdown .dash-dropdown-value-item,
+.dash-dropdown .dash-dropdown-value-item span {
+    color: #e0e0e0 !important;
+    font-weight: 500;
+}
+.dash-dropdown .dash-dropdown-placeholder {
+    color: #8b949e !important;
+}
+.dash-dropdown .dash-dropdown-trigger-icon,
+.dash-dropdown .dash-dropdown-clear-icon {
+    color: #8b949e !important;
+}
+
+/* Multi-select chips */
+.dash-dropdown .dash-dropdown-value-item[data-removable] {
+    background-color: #3d3d5c !important;
+    border-radius: 4px;
+    padding: 1px 6px;
+}
+
+/* Opened menu (rendered in a radix portal at body level) */
+.dash-dropdown-content {
+    background-color: #232338 !important;
+    border: 1px solid #444a63 !important;
+    border-radius: 6px !important;
+    color: #e0e0e0 !important;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Search box inside the menu */
+.dash-dropdown-content .dash-dropdown-search-container {
+    border-bottom: 1px solid #444a63;
+}
+.dash-dropdown-content .dash-dropdown-search {
+    background-color: #2a2a3e !important;
+    color: #e0e0e0 !important;
+    border: none !important;
+}
+.dash-dropdown-content .dash-dropdown-search::placeholder {
+    color: #8b949e;
+}
+.dash-dropdown-content .dash-dropdown-search-icon {
+    color: #8b949e !important;
+}
+
+/* Options */
+.dash-dropdown-option,
+.dash-options-list-option {
+    color: #e0e0e0 !important;
+    background-color: transparent !important;
+    cursor: pointer;
+}
+.dash-dropdown-option:hover,
+.dash-options-list-option:hover,
+.dash-dropdown-option[data-highlighted],
+.dash-options-list-option.focused {
+    background-color: #3d3d5c !important;
+}
+.dash-dropdown-option.selected,
+.dash-options-list-option.selected {
+    background-color: rgba(240, 192, 64, 0.16) !important;
+    color: #f0c040 !important;
+    font-weight: 600;
+}
+.dash-dropdown-option input[type="radio"],
+.dash-dropdown-option input[type="checkbox"],
+.dash-options-list-option input[type="radio"],
+.dash-options-list-option input[type="checkbox"] {
+    accent-color: #f0c040;
+}
+
+/* "No results" message */
+.dash-dropdown-content .dash-dropdown-no-results {
+    color: #8b949e !important;
+}

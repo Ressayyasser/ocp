@@ -1,0 +1,47 @@
+# OCP Cogeneration AI Platform — docker-compose
+#
+#   docker compose up --build
+#
+#   Backend  API   → http://localhost:8000  (docs: /docs)
+#   Frontend Dash  → http://localhost:8050
+#
+# The optional Ollama service powers the RAG chatbot (qwen2.5:7b).
+# Without it the chatbot falls back to rule-based answers.
+
+services:
+  backend:
+    build: .
+    image: ocp-cogeneration-ai
+    working_dir: /app/backend
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    volumes:
+      - ./backend/data:/app/backend/data
+      - ./backend/models:/app/backend/models
+
+  frontend:
+    image: ocp-cogeneration-ai
+    depends_on:
+      - backend
+    working_dir: /app/frontend
+    command: python app.py
+    ports:
+      - "8050:8050"
+    environment:
+      - API_BASE_URL=http://backend:8000
+
+  # Optional — local LLM for the conversational assistant (F28).
+  # Pull the models once:  docker compose exec ollama ollama pull qwen2.5:7b
+  #                        docker compose exec ollama ollama pull nomic-embed-text
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+
+volumes:
+  ollama-models:

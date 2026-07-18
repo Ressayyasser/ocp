@@ -26,7 +26,6 @@ layout = html.Div([
                 options=[{"label": v.replace("_"," ").title(), "value": v} for v in VARIABLES],
                 value="production",
                 clearable=False,
-                style={"backgroundColor": "#2a2a3e", "color": "#fff"},
             ),
         ], width=4),
         dbc.Col([
@@ -63,8 +62,56 @@ layout = html.Div([
     dbc.Card([
         dbc.CardHeader("📖 Explication en langage naturel", className="text-light"),
         dbc.CardBody(html.Div(id="shap-nlp-explanation")),
+    ], className="bg-dark border-secondary mb-4"),
+
+    # SHAP-driven recommendation steps
+    dbc.Card([
+        dbc.CardHeader("🛠️ Recommandations issues de l'analyse SHAP",
+                       className="text-light"),
+        dbc.CardBody(html.Div(id="shap-recommendations")),
     ], className="bg-dark border-secondary"),
 ])
+
+
+def _render_recommendations(recos: list) -> list:
+    """Numbered action steps with cause, reasoning and expected gain."""
+    if not recos:
+        return [html.Div([
+            html.Span("✅ ", style={"fontSize": "18px"}),
+            html.Span("Aucune action corrective requise : aucun facteur ne pénalise "
+                      "significativement la prévision actuelle.",
+                      className="text-success"),
+        ])]
+    cards = []
+    for i, r in enumerate(recos, 1):
+        cards.append(html.Div([
+            html.Div([
+                dbc.Badge(f"Étape {i}", color="warning", text_color="dark",
+                          className="me-2"),
+                html.Strong(r.get("action", "—"), className="text-light"),
+            ], className="mb-2"),
+            html.Div([
+                html.Span("Cause : ", className="text-info fw-bold small"),
+                html.Span(r.get("cause", "—"), className="text-light small"),
+            ], className="mb-1"),
+            html.Div([
+                html.Span("Pourquoi : ", className="text-info fw-bold small"),
+                html.Span(r.get("why", "—"), className="text-light small"),
+            ], className="mb-1"),
+            html.Div([
+                html.Span("Ce que cela peut nous apporter : ",
+                          className="text-success fw-bold small"),
+                html.Span(r.get("expected_gain", "—"), className="text-light small"),
+            ]),
+        ], style={"borderLeft": "3px solid #f0c040", "padding": "10px 14px",
+                  "marginBottom": "12px", "borderRadius": "4px",
+                  "backgroundColor": "rgba(255,255,255,0.03)"}))
+    cards.append(html.P(
+        "Ces étapes sont dérivées des contributions SHAP négatives (facteurs qui "
+        "tirent la prévision vers le bas) : corriger leur cause physique ramène la "
+        "prévision vers son potentiel.",
+        className="text-muted small fst-italic mb-0"))
+    return cards
 
 
 @callback(
@@ -72,6 +119,7 @@ layout = html.Div([
     Output("shap-waterfall",      "figure"),
     Output("shap-heatmap",        "figure"),
     Output("shap-nlp-explanation","children"),
+    Output("shap-recommendations","children"),
     Input("shap-refresh",  "n_clicks"),
     Input("shap-variable", "value"),
 )
@@ -92,6 +140,7 @@ def update_shap(_, variable):
     if isinstance(data, dict) and "error" in data:
         msg = f"Erreur: {data['error']} — Entraînez le modèle XGBoost d'abord."
         return empty_fig(msg), empty_fig(msg), empty_fig(msg), \
+               html.P(msg, className="text-danger"), \
                html.P(msg, className="text-danger")
 
     # Extract SHAP values
@@ -103,6 +152,7 @@ def update_shap(_, variable):
 
     if not feature_names:
         return empty_fig(), empty_fig(), empty_fig(), \
+               html.P("Aucune donnée SHAP — lancez l'entraînement.", className="text-muted"), \
                html.P("Aucune donnée SHAP — lancez l'entraînement.", className="text-muted")
 
     # ── Importance bar ─────────────────────────────────────────────────────────
@@ -161,9 +211,16 @@ def update_shap(_, variable):
     else:
         fig_heat = empty_fig("Pas assez d'échantillons pour la heatmap.")
 
-    # ── NLP explanation ────────────────────────────────────────────────────────
+    # ── NLP explanation (multi-paragraph French narrative) ─────────────────────
     if explanation:
-        nlp = [html.P(explanation, className="text-light")]
+        nlp = [html.P(par, className="text-light", style={"lineHeight": "1.7"})
+               for par in str(explanation).split("\n\n") if par.strip()]
+        nlp.append(html.P(
+            f"Valeur de base du modèle : {base_value:.2f} · "
+            f"Prédiction courante : {data.get('predicted_value', '—')} — "
+            "les barres vertes du waterfall poussent la prédiction vers le haut, "
+            "les rouges vers le bas.",
+            className="text-muted small mb-0"))
     elif sorted_pairs:
         top_feat = feats[0] if feats else "—"
         top_val  = vals[0]  if vals  else 0
@@ -181,4 +238,7 @@ def update_shap(_, variable):
     else:
         nlp = [html.P("Aucune explication disponible.", className="text-muted")]
 
-    return fig_bar, fig_wf, fig_heat, nlp
+    # ── SHAP-driven recommendation steps ───────────────────────────────────────
+    recos = _render_recommendations(data.get("recommendations", []))
+
+    return fig_bar, fig_wf, fig_heat, nlp, recos

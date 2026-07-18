@@ -185,6 +185,8 @@ class IsolationForestDetector:
         out["severity"]      = "normal"
         for sev, thr in _SEV.items():
             out.loc[out["is_anomaly"] & (out["anomaly_score"] < thr), "severity"] = sev
+        # most-deviating feature per row (z-score space) — the probable cause
+        out["anomaly_cause"] = [avail[int(np.argmax(np.abs(x)))] for x in Xs]
         return out
 
     def _safe_detect(self, data: dict, group: str):

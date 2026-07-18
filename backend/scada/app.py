@@ -12,6 +12,8 @@ import pandas as pd
 import numpy as np
 import json
 import uuid
+import math
+import copy
 from datetime import datetime
 import threading
 import time
@@ -69,25 +71,75 @@ base_params = {
 
 drift_factors = {"GTA1": 0.0, "GTA2": 0.0, "GTA3": 0.0}
 
+# Immutable design-point reference (base_params gets mutated by Manual Tuning)
+NOMINAL_PARAMS = copy.deepcopy(base_params)
+
+# Condenser conditions shared by the 3 GTAs
+_T_COND_K   = 45.2 + 273.15     # condensate temperature (K)
+_P_EXHAUST  = 0.09              # condenser vacuum (bar abs)
+
+
+def compute_rendement(gta: str, adm_debit: float, adm_temp: float,
+                      adm_pression: float) -> float:
+    """
+    Thermodynamic efficiency model — rendement responds to the admission
+    conditions instead of being a static value.
+
+        η = η₀ · f_charge(ṁ/ṁ₀) · f_T(T_adm) · f_P(P_adm)
+
+    • f_charge — part-load (Willans) penalty: a turbine is designed for its
+      rated steam flow; running below (or above) it degrades efficiency
+      quadratically:  f = 1 − 0.25·max(0, 1−L)² − 0.08·max(0, L−1)²
+    • f_T — Carnot-like temperature factor: the ideal cycle efficiency is
+      1 − T_cond/T_adm (in Kelvin); normalised by its value at the design
+      temperature, so hotter admission steam ⇒ better rendement.
+    • f_P — pressure factor: the isentropic enthalpy drop grows with the
+      expansion ratio ≈ ln(P_adm/P_exhaust); normalised at design pressure,
+      so higher admission pressure ⇒ more recoverable energy per tonne.
+
+    η₀, ṁ₀, T₀, P₀ are each GTA's design point (NOMINAL_PARAMS).
+    Result clipped to the physical plausibility band [20 %, 55 %].
+    """
+    ref = NOMINAL_PARAMS[gta]
+
+    # Charge (steam flow) factor
+    load = max(0.1, float(adm_debit)) / ref["adm_debit"]
+    f_charge = 1.0 - 0.25 * max(0.0, 1.0 - load) ** 2 \
+                   - 0.08 * max(0.0, load - 1.0) ** 2
+
+    # Carnot temperature factor (Kelvin)
+    t_k, t0_k = float(adm_temp) + 273.15, ref["adm_temp"] + 273.15
+    f_temp = (1.0 - _T_COND_K / t_k) / (1.0 - _T_COND_K / t0_k)
+
+    # Expansion-ratio pressure factor
+    p = max(1.0, float(adm_pression))
+    f_pres = math.log(p / _P_EXHAUST) / math.log(ref["adm_pression"] / _P_EXHAUST)
+
+    eta = ref["rendement"] * f_charge * f_temp * f_pres
+    return round(max(20.0, min(55.0, eta)), 2)
+
 
 def generate_data_point(scenario: str, gta: str, params: dict):
     global drift_factors
     data = params.copy()
     noise = np.random.normal(0, 0.35)
-    
+
+    # Scenario-driven mechanical degradation on top of the thermodynamics
+    # (fouling, bearing wear, ...) expressed as an efficiency penalty in points.
+    rend_penalty = 0.0
     if scenario != "normal":
         drift_factors[gta] = min(1.0, drift_factors[gta] + 0.012)
         intensity = drift_factors[gta]
-        
+
         if scenario == "mild_anomaly":
-            data["rendement"] -= 2.5 * intensity
+            rend_penalty = 2.5 * intensity
             data["adm_debit"] *= (1 - 0.035 * intensity)
             data["vib1"] += 0.8 * intensity
             data["vib2"] += 0.6 * intensity
             data["oil_temp"] += 4.2 * intensity
-            
+
         elif scenario == "severe_anomaly":
-            data["rendement"] -= 8.0 * intensity
+            rend_penalty = 8.0 * intensity
             data["adm_debit"] *= (1 - 0.085 * intensity)
             data["vib1"] += 3.2 * intensity
             data["vib2"] += 2.8 * intensity
@@ -95,13 +147,13 @@ def generate_data_point(scenario: str, gta: str, params: dict):
             data["oil_pression"] -= 0.35 * intensity
             data["vitesse"] -= 210 * intensity
             data["level_pct"] -= 12 * intensity
-            
+
         elif scenario == "fouling":
+            rend_penalty = 3.5 * intensity
             data["adm_temp"] += 12 * intensity
-            data["rendement"] -= 3.5 * intensity
             data["oil_pression"] -= 0.15 * intensity
             data["posit_hp"] += 5.0 * intensity
-            
+
     # Apply dynamic noises to simulated metrics
     data["adm_temp"] += noise
     data["adm_pression"] += noise * 0.05
@@ -109,20 +161,29 @@ def generate_data_point(scenario: str, gta: str, params: dict):
     data["vib1"] = max(0.0, data["vib1"] + np.random.normal(0, 0.015))
     data["vib2"] = max(0.0, data["vib2"] + np.random.normal(0, 0.015))
     data["oil_temp"] += np.random.normal(0, 0.08)
-    
-    # Recalculate basic power output relationships using true dataset ratios
-    # GTA1: ~0.128, GTA2: ~0.097, GTA3: ~0.123
+
+    # ── Rendement from the thermodynamic model ────────────────────────────────
+    # Manual Tuning (débit / T° / P admission) and scenario drifts flow through
+    # the efficiency formula instead of a static baseline value.
+    eta = compute_rendement(gta, data["adm_debit"], data["adm_temp"],
+                            data["adm_pression"])
+    eta = eta - rend_penalty + float(np.random.normal(0, 0.12))
+    data["rendement"] = round(max(20.0, min(55.0, eta)), 2)
+
+    # ── Power output: P = ṁ · k · (η / η₀) ────────────────────────────────────
+    # Base MW/(t/h) ratios from the historical datasets, scaled by the current
+    # relative efficiency so power reacts to both steam flow AND rendement.
     ratios = {"GTA1": 0.128, "GTA2": 0.097, "GTA3": 0.123}
     ratio = ratios.get(gta, 0.128)
-    
-    data["puissance_mw"] = round(data["adm_debit"] * ratio, 2)
+    eta_rel = data["rendement"] / NOMINAL_PARAMS[gta]["rendement"]
+
+    data["puissance_mw"] = round(data["adm_debit"] * ratio * eta_rel, 2)
     data["p_active"] = round(data["puissance_mw"], 2)
     data["p_reactive"] = round(data["p_active"] * 0.605, 2)
-    data["rendement"] = round(max(20.0, min(55.0, data["rendement"])), 2)
-    
+
     data["anomaly_flag"] = 1 if scenario != "normal" else 0
     data["timestamp"] = datetime.now().isoformat()
-    
+
     return data
 
 
@@ -179,8 +240,8 @@ app.layout = dbc.Container([
         dbc.Col(dbc.Card(id="card-gta3", className="bg-dark text-white border-secondary mb-3"), width=4),
     ]),
     
-    dbc.Tabs([
-        dbc.Tab(label="🎛️ Live SCADA Panel", children=[
+    dbc.Tabs(active_tab="tab-live", children=[
+        dbc.Tab(label="🎛️ Live SCADA Panel", tab_id="tab-live", children=[
             dbc.Row([
                 dbc.Col(width=3, children=[
                     dbc.Card([
@@ -208,14 +269,23 @@ app.layout = dbc.Container([
                             html.Hr(),
                             html.H5("Manual Tuning"),
                             dbc.Label("Debit Admission (t/h)"),
-                            dcc.Slider(id="slider-debit", min=100, max=250, value=195, step=1),
-                            
-                            dbc.Label("T° Admission (°C)"),
-                            dcc.Slider(id="slider-t", min=400, max=480, value=460, step=1),
-                            
-                            dbc.Label("P Admission (bar)"),
-                            dcc.Slider(id="slider-p", min=50, max=60, value=54.6, step=0.1),
-                            
+                            dcc.Slider(id="slider-debit", min=100, max=250, value=195, step=1,
+                                       marks={100: "100", 175: "175", 250: "250"},
+                                       tooltip={"placement": "bottom", "always_visible": True}),
+
+                            dbc.Label("T° Admission (°C)", className="mt-2"),
+                            dcc.Slider(id="slider-t", min=400, max=480, value=460, step=1,
+                                       marks={400: "400", 440: "440", 480: "480"},
+                                       tooltip={"placement": "bottom", "always_visible": True}),
+
+                            dbc.Label("P Admission (bar)", className="mt-2"),
+                            dcc.Slider(id="slider-p", min=50, max=60, value=54.6, step=0.1,
+                                       marks={50: "50", 55: "55", 60: "60"},
+                                       tooltip={"placement": "bottom", "always_visible": True}),
+
+                            # Live preview of the thermodynamic efficiency formula
+                            html.Div(id="rendement-preview", className="mt-3"),
+
                             html.Button("Apply Changes", id="apply-btn", className="btn btn-warning w-100 mt-3"),
                         ])
                     ], className="mb-3"),
@@ -228,7 +298,8 @@ app.layout = dbc.Container([
             ])
         ]),
         
-        dbc.Tab(label="📊 History", children=[html.Div(id="history-div")])
+        dbc.Tab(label="📊 History", tab_id="tab-history",
+                children=[html.Div(id="history-div", className="p-3")])
     ]),
     
     dcc.Interval(id='interval', interval=1000, n_intervals=0),
@@ -332,6 +403,29 @@ def update_sliders(gta):
 
 
 @app.callback(
+    Output('rendement-preview', 'children'),
+    [Input('slider-debit', 'value'), Input('slider-t', 'value'),
+     Input('slider-p', 'value'), Input('gta-dropdown', 'value')]
+)
+def preview_rendement(debit, t, p, gta):
+    """Live evaluation of the efficiency formula while tuning the sliders,
+    before the changes are applied to the running simulation."""
+    if None in (debit, t, p) or gta not in NOMINAL_PARAMS:
+        return ""
+    eta = compute_rendement(gta, float(debit), float(t), float(p))
+    eta0 = NOMINAL_PARAMS[gta]["rendement"]
+    delta = eta - eta0
+    color = "success" if delta >= 0 else ("warning" if delta > -3 else "danger")
+    return dbc.Alert([
+        html.Strong(f"η calculé ({gta}) : {eta:.2f} % "),
+        html.Span(f"({delta:+.2f} pt vs design {eta0:.1f} %)",
+                  className="small"),
+        html.Br(),
+        
+    ], color=color, className="py-2 px-3 mb-0")
+
+
+@app.callback(
     [Output('rendement-graph', 'figure'), Output('debit-graph', 'figure')],
     [Input('interval', 'n_intervals'), Input('store', 'data')]
 )
@@ -411,6 +505,15 @@ def get_live_data(gta):
 
 # ====================== START ======================
 if __name__ == '__main__':
+    import os
     init_db()
-    threading.Thread(target=simulation_loop, args=(current_sim_id,), daemon=True).start()
-    app.run(host='0.0.0.0', debug=True, port=8051)
+    # Stable single-process service. Set SCADA_DEBUG=1 for the dev reloader —
+    # in that mode __main__ runs in BOTH the watcher parent and the serving
+    # child, so the simulation loop must only start in the child (otherwise a
+    # zombie parent thread keeps feeding the DB with stale base_params that
+    # Manual Tuning can never reach).
+    DEBUG = os.environ.get("SCADA_DEBUG", "0") == "1"
+    if (not DEBUG) or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        threading.Thread(target=simulation_loop, args=(current_sim_id,),
+                         daemon=True).start()
+    app.run(host='0.0.0.0', debug=DEBUG, port=8051, threaded=True)

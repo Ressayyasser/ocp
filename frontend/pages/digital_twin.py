@@ -3,7 +3,7 @@ pages/digital_twin.py — Digital Twin What-If & Monte Carlo Simulation Dashboar
 """
 
 import dash
-from dash import dcc, html, Input, Output, State, callback, ctx
+from dash import dcc, html, Input, Output, State, callback, ctx, no_update
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -12,6 +12,11 @@ import sys, os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from api_client import run_simulation, compare_scenarios, run_monte_carlo
+from utils.gta_svg import _build_gta_svg, ZONES, ZONE_LABELS, VB_W, VB_H
+from utils.virtual_gta import (
+    BASELINE, SCENARIOS, apply_scenario, detect_anomalies,
+    get_alarms, compute_zone_impacts, global_status,
+)
 
 dash.register_page(__name__, path="/digital-twin", name="Digital Twin", title="Digital Twin")
 
@@ -39,17 +44,23 @@ def layout():
                     className="text-light", selected_className="text-warning"),
             dcc.Tab(label="🎲 Monte Carlo Analysis", value="tab-monte-carlo",
                     className="text-light", selected_className="text-warning"),
+            dcc.Tab(label="🏭 Virtual GTA Twin", value="tab-virtual-gta",
+                    className="text-light", selected_className="text-warning"),
         ]),
-        
+
         # What-If Simulation Tab
         html.Div(id="tab-whatif-content", className="mb-4"),
-        
+
         # Comparison Tab
         html.Div(id="tab-compare-content", className="mb-4"),
-        
+
         # Monte Carlo Tab
         html.Div(id="tab-monte-carlo-content", className="mb-4"),
-        
+
+        # Virtual GTA Twin Tab (independent sandbox — own state, no live feed)
+        html.Div(id="tab-virtual-gta-content", className="mb-4"),
+        dcc.Store(id="vgta-state", data=None),
+
         # Results display
         dbc.Card([
             dbc.CardHeader("📊 Simulation Results", className="text-light"),
@@ -535,6 +546,299 @@ def create_monte_carlo_visualizations(result):
         return {'histogram': fig_hist, 'box': fig_box}
     
     return {'histogram': go.Figure(), 'box': go.Figure()}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  VIRTUAL GTA TWIN — independent sandbox
+#  Own baseline state (utils/virtual_gta.py), no SCADA / live feed / backend.
+#  Scenario → propagation → per-component impact + anomalies + DCS alarms.
+# ═════════════════════════════════════════════════════════════════════════════
+
+_SEV_COLORS = {"critical": "#f85149", "warning": "#d29922", "ok": "#3fb950"}
+_LEVEL_COLORS = {"CRITICAL": "#f85149", "WARNING": "#d29922", "INFO": "#39c5cf"}
+_STATUS_COLORS = {"CRITIQUE": "#f85149", "DÉGRADÉ": "#d29922", "NORMAL": "#3fb950"}
+
+
+def _vgta_zone_overlays(impacts):
+    """Coloured highlight frames positioned over the impacted SVG zones."""
+    overlays = []
+    for zone, info in impacts.items():
+        sev = info["severity"]
+        if sev == "ok":
+            continue
+        zx, zy, zw, zh = ZONES[zone]
+        color = _SEV_COLORS[sev]
+        overlays.append(html.Div(
+            title=f"{ZONE_LABELS[zone]} — impact {info['max_pct']}%",
+            style={
+                "position": "absolute",
+                "left":   f"{zx / VB_W * 100:.3f}%",
+                "top":    f"{zy / VB_H * 100:.3f}%",
+                "width":  f"{zw / VB_W * 100:.3f}%",
+                "height": f"{zh / VB_H * 100:.3f}%",
+                "border": f"2.5px solid {color}",
+                "borderRadius": "14px",
+                "boxShadow": f"0 0 14px {color}66, inset 0 0 14px {color}22",
+                "pointerEvents": "none",
+                "zIndex": 4,
+            },
+            children=html.Span(
+                "⚠ CRITIQUE" if sev == "critical" else "△ IMPACT",
+                style={"position": "absolute", "top": "-11px", "left": "10px",
+                       "backgroundColor": color, "color": "#0d1117",
+                       "fontSize": "10px", "fontWeight": "700",
+                       "padding": "1px 8px", "borderRadius": "8px"},
+            ),
+        ))
+    return overlays
+
+
+def _vgta_alarm_panel(alarms):
+    """DCS-style alarm lamp strip."""
+    lamps = []
+    for a in alarms:
+        color = "#f85149" if a["active"] else "#3fb950"
+        lamps.append(html.Div([
+            html.Div(className=("vgta-lamp-on" if a["active"] else ""), style={
+                "width": "14px", "height": "14px", "borderRadius": "50%",
+                "backgroundColor": color, "margin": "0 auto 4px",
+                "boxShadow": f"0 0 8px {color}" if a["active"] else "none",
+                "animation": "vgta-blink 0.9s infinite" if a["active"] else "none",
+            }),
+            html.Small(a["name"], className="text-light" if a["active"] else "text-muted",
+                       style={"fontSize": "10px", "fontWeight": "600"}),
+        ], className="text-center", style={"minWidth": "76px"}))
+    return dbc.Card([
+        dbc.CardHeader("🚨 Alarmes DCS", className="text-light py-2"),
+        dbc.CardBody(html.Div(lamps, className="d-flex justify-content-around flex-wrap"),
+                     className="py-2"),
+    ], className="bg-dark border-secondary mb-3")
+
+
+def _vgta_anomaly_panel(anomalies):
+    """Detected anomalies list with severity badges."""
+    if not anomalies:
+        body = html.Div([
+            html.Span("✅ ", style={"fontSize": "18px"}),
+            html.Span("Aucune anomalie détectée — état nominal.", className="text-success"),
+        ])
+    else:
+        items = []
+        for a in anomalies:
+            color = _LEVEL_COLORS.get(a["level"], "#8b949e")
+            items.append(html.Div([
+                html.Div([
+                    dbc.Badge(a["level"], style={"backgroundColor": color,
+                                                 "color": "#0d1117"},
+                              className="me-2"),
+                    html.Span(ZONE_LABELS.get(a["zone"], a["zone"]),
+                              className="text-info small fw-bold"),
+                ]),
+                html.Div(a["message"], className="text-light small mt-1"),
+                html.Div(f"Mesure : {a['value']}  (seuil {a['threshold']})",
+                         className="text-muted small"),
+            ], style={"borderLeft": f"3px solid {color}", "padding": "6px 10px",
+                      "marginBottom": "8px",
+                      "backgroundColor": "rgba(255,255,255,0.03)",
+                      "borderRadius": "4px"}))
+        body = html.Div(items)
+    return dbc.Card([
+        dbc.CardHeader(f"🔍 Anomalies détectées ({len(anomalies)})",
+                       className="text-light py-2"),
+        dbc.CardBody(body, style={"maxHeight": "330px", "overflowY": "auto"},
+                     className="py-2"),
+    ], className="bg-dark border-secondary mb-3")
+
+
+def _vgta_impact_grid(impacts):
+    """Per-component impact cards (baseline → new value, Δ %)."""
+    cards = []
+    for zone, info in impacts.items():
+        sev, changes = info["severity"], info["changes"]
+        color = _SEV_COLORS[sev]
+        rows = []
+        for c in changes[:5]:
+            pct_color = ("#f85149" if abs(c["pct"]) >= 15
+                         else "#d29922" if abs(c["pct"]) >= 5 else "#8b949e")
+            rows.append(html.Div([
+                html.Span(c["label"], className="text-muted small"),
+                html.Span([
+                    html.Span(f"{c['base']} → ", className="text-muted small"),
+                    html.Span(f"{c['new']} {c['unit']} ", className="text-light small fw-bold"),
+                    html.Span(f"({c['pct']:+.1f}%)",
+                              style={"color": pct_color, "fontSize": "12px",
+                                     "fontWeight": "700"}),
+                ]),
+            ], className="d-flex justify-content-between",
+               style={"borderBottom": "1px solid #21262d", "padding": "4px 0"}))
+        if not rows:
+            rows = [html.Div("Aucun impact", className="text-muted small")]
+        badge_txt = {"critical": "CRITIQUE", "warning": "IMPACTÉ", "ok": "OK"}[sev]
+        cards.append(dbc.Card([
+            dbc.CardHeader([
+                html.Span(ZONE_LABELS[zone], className="text-light small fw-bold"),
+                dbc.Badge(badge_txt, style={"backgroundColor": color, "color": "#0d1117"},
+                          className="float-end"),
+            ], className="py-2"),
+            dbc.CardBody(rows, className="py-2"),
+        ], className="bg-dark mb-3",
+           style={"border": f"1px solid {color if sev != 'ok' else '#30363d'}"}))
+    return html.Div([
+        html.H5("🧩 Impact par composant du GTA", className="text-light mt-2 mb-3"),
+        html.Div(cards, style={"display": "grid",
+                               "gridTemplateColumns": "repeat(auto-fill, minmax(280px, 1fr))",
+                               "gap": "0 14px"}),
+    ])
+
+
+def _vgta_alert_banner(anomalies, scenario_label):
+    """Operator alert banner mirroring the alert-service levels."""
+    criticals = [a for a in anomalies if a["level"] == "CRITICAL"]
+    warnings = [a for a in anomalies if a["level"] == "WARNING"]
+    if criticals:
+        return dbc.Alert([
+            html.H6(f"🚨 ALERTE CRITIQUE — {scenario_label}",
+                    className="alert-heading fw-bold"),
+            html.Ul([html.Li(a["message"]) for a in criticals], className="mb-1"),
+            html.Small("Intervention opérateur requise — voir composants surlignés "
+                       "en rouge sur le synoptique.", className="fst-italic"),
+        ], color="danger", className="border-danger")
+    if warnings:
+        return dbc.Alert([
+            html.H6(f"⚠️ Avertissement — {scenario_label}", className="alert-heading fw-bold"),
+            html.Ul([html.Li(a["message"]) for a in warnings], className="mb-0"),
+        ], color="warning")
+    return None
+
+
+def _vgta_build_view(state):
+    """Full virtual-twin view for the current sandbox state."""
+    scenario_key = (state or {}).get("scenario")
+    intensity = (state or {}).get("intensity", 0) or 0
+    record = apply_scenario(scenario_key, intensity) if scenario_key else dict(BASELINE)
+    anomalies = detect_anomalies(record)
+    alarms = get_alarms(record)
+    impacts = compute_zone_impacts(BASELINE, record, anomalies)
+    status = global_status(anomalies)
+    status_color = _STATUS_COLORS[status]
+    scenario_label = (SCENARIOS[scenario_key]["label"]
+                      if scenario_key in SCENARIOS else "État nominal")
+
+    banner = _vgta_alert_banner(anomalies, scenario_label)
+
+    header = html.Div([
+        html.Div([
+            html.Span("État du GTA virtuel : ", className="text-muted"),
+            dbc.Badge(status, style={"backgroundColor": status_color,
+                                     "color": "#0d1117", "fontSize": "14px"},
+                      className="me-3"),
+            dbc.Badge(f"Scénario : {scenario_label}"
+                      + (f" · intensité {intensity:.0f}%" if scenario_key else ""),
+                      color="secondary", className="me-2"),
+        ]),
+    ], className="d-flex align-items-center mb-3")
+
+    synoptic = html.Div(
+        style={"position": "relative"},
+        children=[_build_gta_svg({"data": [record], "is_live": False}, "GTA VIRTUEL"),
+                  *_vgta_zone_overlays(impacts)],
+    )
+
+    return html.Div([
+        *( [banner] if banner is not None else [] ),
+        header,
+        dbc.Row([
+            dbc.Col(dbc.Card(dbc.CardBody(synoptic, className="p-0"),
+                             className="bg-dark border-secondary overflow-hidden"),
+                    lg=8, md=12, className="mb-3"),
+            dbc.Col([
+                _vgta_alarm_panel(alarms),
+                _vgta_anomaly_panel(anomalies),
+            ], lg=4, md=12),
+        ]),
+        _vgta_impact_grid(impacts),
+    ])
+
+
+# Virtual GTA Tab Content (controls restored from the store on re-render)
+@callback(
+    Output("tab-virtual-gta-content", "children"),
+    Input("sim-tabs", "value"),
+    Input("vgta-state", "data"),
+)
+def render_virtual_gta_tab(active_tab, state):
+    if active_tab != "tab-virtual-gta":
+        return html.Div()
+
+    scenario_value = (state or {}).get("scenario") or "pressure_drop"
+    intensity_value = (state or {}).get("intensity") or 50
+
+    controls = dbc.Card([
+        dbc.CardHeader("🏭 GTA Virtuel — Sandbox de simulation indépendante",
+                       className="text-light"),
+        dbc.CardBody([
+            html.P("Jumeau virtuel découplé du système réel : appliquez un scénario "
+                   "et observez sa propagation sur chaque composant du GTA, les "
+                   "anomalies détectées et les alarmes déclenchées.",
+                   className="text-muted small"),
+            dbc.Row([
+                dbc.Col([
+                    html.Label("Scénario de simulation", className="text-light"),
+                    dcc.Dropdown(
+                        id="vgta-scenario",
+                        options=[{"label": s["label"], "value": k}
+                                 for k, s in SCENARIOS.items()],
+                        value=scenario_value, clearable=False,
+                    ),
+                    html.Div(id="vgta-scenario-desc", className="text-info small mt-2"),
+                ], width=5),
+                dbc.Col([
+                    html.Label("Intensité du scénario (%)", className="text-light"),
+                    dcc.Slider(
+                        id="vgta-intensity", min=10, max=100, step=5,
+                        value=intensity_value,
+                        marks={10: "10%", 50: "50%", 100: "100%"},
+                    ),
+                ], width=4),
+                dbc.Col([
+                    html.Label(" ", className="d-block"),
+                    dbc.ButtonGroup([
+                        dbc.Button("▶ Appliquer le scénario", id="vgta-apply-btn",
+                                   color="warning"),
+                        dbc.Button("↺ Réinitialiser", id="vgta-reset-btn",
+                                   color="secondary", outline=True),
+                    ], className="w-100"),
+                ], width=3),
+            ], className="align-items-end"),
+        ]),
+    ], className="bg-dark border-secondary mb-4")
+
+    return html.Div([controls, html.Div(_vgta_build_view(state), id="vgta-view")])
+
+
+@callback(
+    Output("vgta-scenario-desc", "children"),
+    Input("vgta-scenario", "value"),
+)
+def vgta_scenario_description(key):
+    scenario = SCENARIOS.get(key)
+    return scenario["description"] if scenario else ""
+
+
+@callback(
+    Output("vgta-state", "data"),
+    Input("vgta-apply-btn", "n_clicks"),
+    Input("vgta-reset-btn", "n_clicks"),
+    State("vgta-scenario", "value"),
+    State("vgta-intensity", "value"),
+    prevent_initial_call=True,
+)
+def vgta_apply_or_reset(n_apply, n_reset, scenario, intensity):
+    if ctx.triggered_id == "vgta-reset-btn":
+        return None                          # back to nominal baseline
+    if not n_apply:
+        return no_update
+    return {"scenario": scenario, "intensity": intensity}
 
 
 # Update slider value displays
