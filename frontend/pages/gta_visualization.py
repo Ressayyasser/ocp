@@ -172,7 +172,7 @@ def _build_equip_detail(key, last, records, gta_name, trend_records=None):
     if key == "turbine":
         rend_col = _rend_color(d["rendement"])
         alarms = [
-            ("TRIP",        d["rendement"] < 35),
+            ("TRIP",        d["rendement"] < 33),
             ("VIBRATION",   d["vib2"] > 0.8),
             ("LOW VACUUM",  d["ext_pression"] > 0.12),
             ("TEMP. ADM.",  d["adm_temp"] > 460),

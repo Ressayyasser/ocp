@@ -72,8 +72,9 @@ _ELEC_FLOW = "#2ec27e"   # liaison electrique
 
 
 def _rend_color(r):
-    if r > 85:  return _GREEN
-    if r > 75:  return _ORANGE
+    # GTA à soutirage MP : rendement thermique nominal ≈ 40 %, plage 40–50 %
+    if r >= 40:  return _GREEN
+    if r >= 34:  return _ORANGE      # GTA2 (design 35 %) reste en surveillance
     return _RED
 
 
@@ -230,8 +231,9 @@ def _build_gta_svg(data: dict, gta_name: str) -> html.Div:
 
     gta_col  = _GTA_COLORS.get(gta_name, "#1f6feb")
     rend_col = _rend_color(d["rendement"])
-    statut   = "NORMAL" if d["rendement"] > 85 else "DÉGRADÉ"
-    alarm_active = d["rendement"] < 35 or d["vib2"] > 0.8 or d["ext_pression"] > 0.12
+    # Plage normale d'un GTA à soutirage MP : 40–50 % (GTA2 : design 35 %)
+    statut   = "NORMAL" if d["rendement"] >= 34 else "DÉGRADÉ"
+    alarm_active = d["rendement"] < 33 or d["vib2"] > 0.8 or d["ext_pression"] > 0.12
 
     # ── DEFS ──────────────────────────────────────────────────────────────
     defs = svg.Defs(children=[

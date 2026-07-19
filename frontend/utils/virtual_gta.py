@@ -30,7 +30,8 @@ BASELINE: dict[str, float] = {
     "ext_debit":     90.0,    # t/h   — exhaust flow
     "ext_pression":  0.09,    # bar   — condenser vacuum
     "puissance_mw":  600.0,   # MWh/day (=> 25.0 MW after /24)
-    "rendement":     88.0,    # %     — isentropic efficiency
+    "rendement":     41.7,    # %     — GTA à soutirage MP : rendement thermique
+                              #         nominal (plage réelle 40–50 %)
     "bp_pression":   0.9,     # bar
     "bp_debit":      8.7,     # t/h
     "vib1":          0.20,    # mm/s  — bearing 1 vibration
@@ -64,7 +65,7 @@ SCENARIOS: dict[str, dict] = {
         "effects": {
             "adm_pression": (-0.25, "mul"), "vap_inlet": (-0.25, "mul"),
             "adm_debit":    (-0.10, "mul"), "puissance_mw": (-0.30, "mul"),
-            "p_active":     (-0.30, "mul"), "rendement": (-9.0, "add"),
+            "p_active":     (-0.30, "mul"), "rendement": (-5.0, "add"),
             "ext_pression": (+0.45, "mul"), "sout_pression": (-0.12, "mul"),
             "posit_hp":     (+0.15, "mul"),
         },
@@ -75,7 +76,7 @@ SCENARIOS: dict[str, dict] = {
                        "défaillant). Contraintes thermiques sur le corps HP, "
                        "dilatations et vibrations en hausse.",
         "effects": {
-            "adm_temp": (+42.0, "add"), "rendement": (-4.0, "add"),
+            "adm_temp": (+42.0, "add"), "rendement": (-2.5, "add"),
             "vib2": (+0.35, "add"), "vib1": (+0.15, "add"),
             "oil_temp": (+12.0, "add"), "dd3": (+0.25, "add"),
         },
@@ -87,7 +88,7 @@ SCENARIOS: dict[str, dict] = {
                        "d'arbre turbine–alternateur.",
         "effects": {
             "vib2": (+0.65, "add"), "vib1": (+0.30, "add"),
-            "rendement": (-2.0, "add"), "dd3": (+0.35, "add"),
+            "rendement": (-1.5, "add"), "dd3": (+0.35, "add"),
             "oil_temp": (+6.0, "add"),
         },
     },
@@ -98,7 +99,7 @@ SCENARIOS: dict[str, dict] = {
         "effects": {
             "adm_debit": (-0.20, "mul"), "sout_debit": (-0.15, "mul"),
             "bp_debit": (-0.15, "mul"), "puissance_mw": (-0.22, "mul"),
-            "p_active": (-0.22, "mul"), "rendement": (-6.5, "add"),
+            "p_active": (-0.22, "mul"), "rendement": (-3.5, "add"),
             "posit_hp": (+0.10, "mul"),
         },
     },
@@ -108,7 +109,7 @@ SCENARIOS: dict[str, dict] = {
                        "la contre-pression augmente et le cycle perd du rendement.",
         "effects": {
             "ext_pression": (+1.20, "mul"), "cond_temp": (+14.0, "add"),
-            "rendement": (-5.0, "add"), "puissance_mw": (-0.08, "mul"),
+            "rendement": (-3.0, "add"), "puissance_mw": (-0.08, "mul"),
             "p_active": (-0.08, "mul"), "level_pct": (+10.0, "add"),
             "cond_eau": (-0.10, "mul"),
         },
@@ -204,10 +205,10 @@ ANOMALY_RULES: list[tuple] = [
      "Vibration palier n°2 critique (>0.80 mm/s) — défaut roulement probable", "turbine"),
     ("vib2", ">", 0.60, "WARNING",
      "Vibration palier n°2 élevée (>0.60 mm/s)", "turbine"),
-    ("rendement", "<", 60.0, "CRITICAL",
-     "Rendement isentropique critique (<60 %) — dégradation majeure", "turbine"),
-    ("rendement", "<", 78.0, "WARNING",
-     "Rendement isentropique dégradé (<78 %)", "turbine"),
+    ("rendement", "<", 33.0, "CRITICAL",
+     "Rendement thermique critique (<33 %) — dégradation majeure", "turbine"),
+    ("rendement", "<", 38.0, "WARNING",
+     "Rendement thermique sous la plage normale 40–50 % (<38 %)", "turbine"),
     ("oil_temp", ">", 55.0, "WARNING",
      "Température huile de graissage élevée (>55 °C)", "turbine"),
     ("ext_pression", ">", 0.120, "CRITICAL",
@@ -228,7 +229,7 @@ ANOMALY_RULES: list[tuple] = [
 
 # DCS alarm lamps shown on the panel (name → predicate on the record)
 ALARM_LAMPS: list[tuple] = [
-    ("TRIP",       lambda d: d["rendement"] < 60 or d["p_active"] > 35),
+    ("TRIP",       lambda d: d["rendement"] < 33 or d["p_active"] > 35),
     ("VIBRATION",  lambda d: d["vib2"] > 0.80),
     ("LOW VACUUM", lambda d: d["ext_pression"] > 0.120),
     ("TEMP. ADM.", lambda d: d["adm_temp"] > 475),
