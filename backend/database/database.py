@@ -169,6 +169,14 @@ def init_db():
             temperature     REAL,
             hours_operation REAL
         );
+
+        -- Hot-path indexes (alerts feed polls + live SCADA queries)
+        CREATE INDEX IF NOT EXISTS idx_alerts_ts ON alerts(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_alerts_level_ts ON alerts(level, timestamp);
+        CREATE INDEX IF NOT EXISTS idx_simdata_gta_id
+            ON simulation_data(gta_type, id);
+        CREATE INDEX IF NOT EXISTS idx_simdata_sim_gta_ts
+            ON simulation_data(simulation_id, gta_type, timestamp);
     """)
     conn.commit()
     conn.close()

@@ -186,6 +186,12 @@ def aggregate_simulation_daily(after: str | None = None) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
     df["date"] = df["timestamp"].astype(str).str[:10]
+    # Unit harmonisation: backfill rows store puissance_mw = daily-MWh / 24,
+    # while the live 1 Hz simulator stores instantaneous MW whose numeric value
+    # already matches the dataset's daily per-GTA energy scale (~25).
+    df["gta_mwh"] = np.where(df.get("simulation_id") == BACKFILL_SIM_ID,
+                             pd.to_numeric(df["puissance_mw"], errors="coerce") * 24.0,
+                             pd.to_numeric(df["puissance_mw"], errors="coerce"))
     grouped = df.groupby(["date", "gta_type"]).mean(numeric_only=True).reset_index()
 
     cons_ratio = _hist_stats().get("cons_ratio", 0.2)
@@ -201,7 +207,7 @@ def aggregate_simulation_daily(after: str | None = None) -> pd.DataFrame:
             r = per.get(gta)
             if r is None:
                 continue
-            mwh = float(r["puissance_mw"]) * 24.0
+            mwh = float(r["gta_mwh"])
             rec[f"gta{i}"]             = round(mwh, 1)
             rec[f"debit_adm_gta{i}"]   = round(float(r["adm_debit"]), 1)
             rec[f"debit_sout_gta{i}"]  = round(float(r["sout_debit"]), 1)
@@ -242,10 +248,29 @@ def aggregate_simulation_daily(after: str | None = None) -> pd.DataFrame:
 #  3. Combined continuous series
 # ─────────────────────────────────────────────────────────────────────────────
 
+# The combined series only changes when a new day is aggregated or the live
+# simulator adds rows — recomputing it on EVERY API call (several endpoints ×
+# dashboards polling every few seconds) starves the server. Short TTL cache.
+_CACHE_TTL_S = 60.0
+_cache: dict = {"key": None, "ts": 0.0, "df": None}
+
+
 def get_combined_daily_df(limit: int = 2000, backfill: bool = True) -> pd.DataFrame:
     """historical_data + daily simulation aggregates, as one continuous daily
     series ending today. Raw (uncleaned) — callers apply clean_dataframe /
-    add_all_features as usual."""
+    add_all_features as usual. Cached for a short TTL."""
+    import time as _time
+    now = _time.monotonic()
+    if (_cache["df"] is not None and _cache["key"] == limit
+            and now - _cache["ts"] < _CACHE_TTL_S):
+        return _cache["df"].copy()
+
+    df = _build_combined_daily_df(limit=limit, backfill=backfill)
+    _cache.update(key=limit, ts=now, df=df.copy() if not df.empty else df)
+    return df
+
+
+def _build_combined_daily_df(limit: int = 2000, backfill: bool = True) -> pd.DataFrame:
     if backfill:
         try:
             backfill_simulation_gap()

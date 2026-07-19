@@ -36,7 +36,7 @@ layout = html.Div([
 
     # Score timeline
     dbc.Card([
-        dbc.CardHeader("Score d'anomalie dans le temps (30 derniers jours)",
+        dbc.CardHeader("Score d'anomalie dans le temps ",
                        className="text-light"),
         dbc.CardBody(dcc.Graph(id="anom-score-chart", style={"height": "300px"})),
     ], className="bg-dark border-secondary mb-4"),

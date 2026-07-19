@@ -76,7 +76,7 @@ layout = html.Div([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader("Production journalière — 30 derniers jours", className="text-light"),
+                dbc.CardHeader("Production journalière", className="text-light"),
                 dbc.CardBody(dcc.Graph(id="production-chart", style={"height": "300px"})),
             ], className="bg-dark border-secondary"),
         ], width=8),
@@ -91,7 +91,7 @@ layout = html.Div([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader("Rendement GTA (30j)", className="text-light"),
+                dbc.CardHeader("Rendement GTA", className="text-light"),
                 dbc.CardBody(dcc.Graph(id="rendement-chart", style={"height": "280px"})),
             ], className="bg-dark border-secondary"),
         ], width=8),

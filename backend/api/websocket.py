@@ -48,21 +48,38 @@ async def ws_realtime(websocket: WebSocket):
         _realtime_mgr.disconnect(websocket)
 
 
+_alert_bridge_installed = False
+
+
+def _install_alert_bridge(app, loop: asyncio.AbstractEventLoop):
+    """Subscribe ONCE to the AlertService and bridge its worker-thread
+    callbacks onto the asyncio loop. AlertService fires from the SCADA
+    simulator thread, where `asyncio.create_task` would raise ("no running
+    event loop") and alerts would silently never reach the browser —
+    `run_coroutine_threadsafe` is the correct hand-off."""
+    global _alert_bridge_installed
+    if _alert_bridge_installed:
+        return
+    alert_svc = getattr(app.state, "alerts", None)
+    if alert_svc is None:
+        return
+
+    def _thread_cb(alert: dict):
+        try:
+            asyncio.run_coroutine_threadsafe(
+                _alert_mgr.broadcast({"type": "alert", "data": alert}), loop)
+        except Exception:
+            pass
+
+    alert_svc.subscribe(_thread_cb)
+    _alert_bridge_installed = True
+
+
 @ws_router.websocket("/ws/alerts")
 async def ws_alerts(websocket: WebSocket):
     """Broadcasts newly compiled anomaly alerts down live pipelines."""
     await _alert_mgr.connect(websocket)
-
-    # Register alert callbacks utilizing parent application context references
-    alert_svc = getattr(websocket.app.state, "alerts", None)
-    if alert_svc:
-        async def _send(alert: dict):
-            await _alert_mgr.broadcast({"type": "alert", "data": alert})
-        
-        def _sync_cb(a):
-            asyncio.create_task(_send(a))
-            
-        alert_svc.subscribe(_sync_cb)
+    _install_alert_bridge(websocket.app, asyncio.get_running_loop())
 
     try:
         while True:

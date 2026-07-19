@@ -10,14 +10,9 @@ import dash
 from dash import html, dcc
 from dash.dependencies import Input, Output, State
 
-try:
-    import websocket  # websocket-client
-    _HAS_WS = True
-except ImportError:
-    _HAS_WS = False
-
-# Reconnect/keep-alive polling fallback if websocket-client is unavailable.
-_WS_URL = "ws://localhost:8000/ws/alerts"
+# The toast client runs entirely in the BROWSER (native WebSocket) — no Python
+# websocket package is required. The JS is therefore always injected.
+_HAS_WS = True
 
 LEVEL_STYLE = {
     "CRITICAL": {"bg": "#ff4d4d", "icon": "bi-exclamation-octagon-fill"},
@@ -85,8 +80,18 @@ def register_alert_toast(app, api_base: str = "http://localhost:8000"):
             <script>
             (function() {{
                 var MAX_ALERTS = 5;
-                var container = document.getElementById('alert-toast-container');
-                if (!container) return;
+                var container = null;
+
+                // Dash renders the layout AFTER this script runs — wait for the
+                // toast container to exist before wiring everything up.
+                var bootTimer = setInterval(function() {{
+                    container = document.getElementById('alert-toast-container');
+                    if (!container) return;
+                    clearInterval(bootTimer);
+                    boot();
+                }}, 300);
+
+                function boot() {{
 
                 // ── Audible alarm (WebAudio, generated — no asset needed) ──────
                 var audioCtx = null;
@@ -123,6 +128,9 @@ def register_alert_toast(app, api_base: str = "http://localhost:8000"):
 
                 function showAlert(a) {{
                     var lvl = (a.level || 'INFO').toUpperCase();
+                    // Toasts + alarm are reserved for threshold breaches
+                    // (WARNING/CRITICAL). INFO stays in the alert panels.
+                    if (lvl === 'INFO') return;
                     var critical = lvl === 'CRITICAL';
                     var warning  = lvl === 'WARNING';
                     var colors = {{CRITICAL:'#ff4d4d', WARNING:'#ffd93d', INFO:'#4d9de0'}};
@@ -208,6 +216,7 @@ def register_alert_toast(app, api_base: str = "http://localhost:8000"):
                     }} catch(e) {{ setTimeout(connect, 3000); }}
                 }}
                 connect();
+                }}  // end boot()
             }})();
             </script>
             </body>"""

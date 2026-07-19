@@ -74,14 +74,26 @@ def _get_dt():
     return _digital_twin
 
 
+_df_cache: dict = {"ts": 0.0, "df": None}
+_DF_CACHE_TTL_S = 30.0
+
+
 def _get_df():
     # Historical Excel data + daily aggregates of simulation_data, so the
     # series stays continuous up to the present day (gap auto-backfilled).
+    # Cached: nearly every endpoint calls this, and dashboards poll every few
+    # seconds — recomputing the pipeline per request starves the server.
+    import time as _time
+    now = _time.monotonic()
+    if _df_cache["df"] is not None and now - _df_cache["ts"] < _DF_CACHE_TTL_S:
+        return _df_cache["df"]
+
     df = get_combined_daily_df(limit=2000)
     if df.empty:
         return pd.DataFrame()
     df = clean_dataframe(df)
     df = add_all_features(df)
+    _df_cache.update(ts=now, df=df)
     return df
 
 
@@ -391,6 +403,17 @@ def simulate(req: SimulationRequest):
 def get_alerts(limit: int = 50):
     rows = query("SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?", [limit])
     return {"alerts": rows, "count": len(rows)}
+
+
+@router.post("/alerts/test")
+def alerts_test(request: Request, level: str = "CRITICAL",
+                message: str = "Test alarme opérateur — vibration GTA2 simulée"):
+    """Fire a manual alert through the full pipeline (DB + WebSocket toast +
+    audible alarm). Used to demo/verify the operator alarm chain."""
+    svc = getattr(request.app.state, "alerts", None)
+    if svc is None:
+        raise HTTPException(503, "Alert service not ready")
+    return sanitize_for_json(svc.create_manual(level.upper(), message, source="test"))
 
 
 @router.post("/alerts/{alert_id}/acknowledge")

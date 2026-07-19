@@ -152,13 +152,22 @@ _SUGGESTED_ACTIONS: dict[str, str] = {
 
 class AlertService:
 
+    # A (variable, level) pair re-fires at most once per cooldown window —
+    # live SCADA readings arrive at 1 Hz, and a breached threshold must raise
+    # ONE loud alarm, not one per second.
+    ALERT_COOLDOWN_S = 60.0
+
     def __init__(self):
         self._subscribers: list = []   # callbacks for WebSocket broadcast
+        self._last_fired: dict[tuple, float] = {}   # (var, level) → monotonic ts
 
     # ── Threshold evaluation helper ─────────────────────────────────────────────
 
     def _check_thresholds(self, reading: dict, thresholds: list[dict]) -> list[dict]:
-        """Evaluate a reading against a threshold list. Returns new alerts."""
+        """Evaluate a reading against a threshold list. Returns new alerts
+        (deduplicated: each (variable, level) fires once per cooldown)."""
+        import time as _time
+        now = _time.monotonic()
         new_alerts: list[dict] = []
         for rule in thresholds:
             val = reading.get(rule["var"])
@@ -167,6 +176,11 @@ class AlertService:
             triggered = (rule["op"] == ">" and float(val) > float(rule["thr"])) or \
                         (rule["op"] == "<" and float(val) < float(rule["thr"]))
             if triggered:
+                key = (rule["var"], rule["level"])
+                last = self._last_fired.get(key)
+                if last is not None and now - last < self.ALERT_COOLDOWN_S:
+                    continue
+                self._last_fired[key] = now
                 action = _SUGGESTED_ACTIONS.get(rule["var"], "Inspect system")
                 alert  = self._create_alert(
                     level=rule["level"],
@@ -230,10 +244,20 @@ class AlertService:
 
     # ── Anomaly-derived alert ─────────────────────────────────────────────────
 
-    def alert_from_anomaly(self, anomaly: dict) -> dict:
+    def alert_from_anomaly(self, anomaly: dict) -> dict | None:
         sev_map = {"critical": "CRITICAL", "warning": "WARNING", "info": "INFO"}
         level   = sev_map.get(anomaly.get("severity", "info"), "INFO")
         cause   = anomaly.get("cause", "unknown variable")
+        group   = anomaly.get("group", cause)
+        # Cooldown: live readings are evaluated at 1 Hz — the same anomaly
+        # group must not spam an alert every second.
+        import time as _time
+        now = _time.monotonic()
+        key = ("anomaly:" + str(group), level)
+        last = self._last_fired.get(key)
+        if last is not None and now - last < self.ALERT_COOLDOWN_S:
+            return None
+        self._last_fired[key] = now
         score   = anomaly.get("score", 0)
         msg     = (f"Anomaly detected in '{cause}' "
                    f"(score={score:.3f}) — {anomaly.get('label', '')}")
